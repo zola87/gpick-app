@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { LiveSession } from './components/LiveSession';
@@ -12,6 +11,44 @@ import { Product, Order, Customer, GlobalSettings } from './types';
 
 // Safe ID generator for Init Data
 const safeId = () => Math.random().toString(36).substring(2, 10);
+
+// --- Custom Hook for LocalStorage ---
+function useLocalStorage<T>(key: string, initialValue: T) {
+  // State to store our value
+  // Pass initial state function to useState so logic is only executed once
+  const [storedValue, setStoredValue] = useState<T>(() => {
+    if (typeof window === "undefined") {
+      return initialValue;
+    }
+    try {
+      const item = window.localStorage.getItem(key);
+      return item ? JSON.parse(item) : initialValue;
+    } catch (error) {
+      console.log(error);
+      return initialValue;
+    }
+  });
+
+  // Return a wrapped version of useState's setter function that ...
+  // ... persists the new value to localStorage.
+  const setValue = (value: T | ((val: T) => T)) => {
+    try {
+      // Allow value to be a function so we have same API as useState
+      const valueToStore = value instanceof Function ? value(storedValue) : value;
+      
+      // Save state
+      setStoredValue(valueToStore);
+      
+      // Save to local storage
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(key, JSON.stringify(valueToStore));
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  };
+  return [storedValue, setValue] as const;
+}
 
 // Initial Data
 const INITIAL_PRODUCTS: Product[] = [
@@ -67,11 +104,18 @@ function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'live' | 'shopping' | 'billing' | 'crm' | 'settings' | 'inventory'>('live');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Global State
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
-  const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
-  const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
-  const [settings, setSettings] = useState<GlobalSettings>(INITIAL_SETTINGS);
+  // Global State with LocalStorage Persistence
+  const [products, setProducts] = useLocalStorage<Product[]>('gpick_products', INITIAL_PRODUCTS);
+  const [customers, setCustomers] = useLocalStorage<Customer[]>('gpick_customers', INITIAL_CUSTOMERS);
+  const [orders, setOrders] = useLocalStorage<Order[]>('gpick_orders', INITIAL_ORDERS);
+  const [settings, setSettings] = useLocalStorage<GlobalSettings>('gpick_settings', INITIAL_SETTINGS);
+
+  // Ensure Stock Customer Exists (in case local storage is old)
+  useEffect(() => {
+    if (!customers.find(c => c.isStock)) {
+       setCustomers(prev => [{ id: 'stock-001', lineName: '📦 庫存/現貨區', nickname: 'Stock', isStock: true, isBlacklisted: false }, ...prev]);
+    }
+  }, [customers, setCustomers]);
 
   // Handlers
   const handleAddProduct = (newProduct: Product) => {
@@ -99,8 +143,18 @@ function App() {
     setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
   };
 
+  const handleDeleteOrder = (orderId: string) => {
+      setOrders(prev => prev.filter(o => o.id !== orderId));
+  };
+
   const handleUpdateCustomer = (updatedCustomer: Customer) => {
     setCustomers(prev => prev.map(c => c.id === updatedCustomer.id ? updatedCustomer : c));
+  };
+
+  const handleDeleteCustomer = (customerId: string) => {
+      if(window.confirm('確定要刪除此顧客資料嗎？此操作無法復原。')) {
+          setCustomers(prev => prev.filter(c => c.id !== customerId));
+      }
   };
 
   // Archive all current orders (EXCEPT STOCK) to start a new trip
@@ -170,6 +224,57 @@ function App() {
     document.body.removeChild(link);
   };
 
+  // --- Data Backup & Restore Functions ---
+  const exportBackupJSON = () => {
+    const backupData = {
+      products,
+      customers,
+      orders,
+      settings,
+      timestamp: Date.now(),
+      version: '1.0'
+    };
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `GPick_Backup_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const importBackupJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        
+        // Basic Validation
+        if (data.products && data.customers && data.orders) {
+           if(window.confirm('【警告】確定要還原此備份檔嗎？\n\n目前的資料將被「完全覆蓋」，此操作無法復原！')) {
+               setProducts(data.products);
+               setCustomers(data.customers);
+               setOrders(data.orders);
+               if(data.settings) setSettings(data.settings);
+               alert('資料還原成功！系統已更新。');
+           }
+        } else {
+           alert('錯誤：這不是有效的 GPick 備份檔案。');
+        }
+      } catch (err) {
+        alert('讀取檔案失敗：檔案可能已損毀。');
+        console.error(err);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be selected again
+    e.target.value = '';
+  };
+
   const NavItem = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
     <button
       onClick={() => {
@@ -232,7 +337,13 @@ function App() {
             <Dashboard products={products} orders={orders} customers={customers} settings={settings} />
           )}
           {activeTab === 'crm' && (
-             <CRM customers={customers} orders={orders} products={products} onUpdateCustomer={handleUpdateCustomer} />
+             <CRM 
+               customers={customers} 
+               orders={orders} 
+               products={products} 
+               onUpdateCustomer={handleUpdateCustomer} 
+               onDeleteCustomer={handleDeleteCustomer}
+             />
           )}
           {activeTab === 'live' && (
             <LiveSession 
@@ -269,10 +380,18 @@ function App() {
               customers={customers}
               onUpdateOrder={handleUpdateOrder}
               onAddOrder={handleAddOrder}
+              onDeleteOrder={handleDeleteOrder}
             />
           )}
           {activeTab === 'settings' && (
-            <Settings settings={settings} onSave={setSettings} onArchive={handleArchiveOrders} onExport={exportToCSV} />
+            <Settings 
+              settings={settings} 
+              onSave={setSettings} 
+              onArchive={handleArchiveOrders} 
+              onExport={exportToCSV}
+              onExportBackup={exportBackupJSON}
+              onImportBackup={importBackupJSON}
+            />
           )}
         </div>
       </main>

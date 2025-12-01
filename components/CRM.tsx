@@ -1,16 +1,17 @@
 
 import React, { useState } from 'react';
 import { Customer, Order, Product } from '../types';
-import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle } from 'lucide-react';
+import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle, Trash2 } from 'lucide-react';
 
 interface CRMProps {
   customers: Customer[];
   orders: Order[];
   products: Product[];
   onUpdateCustomer: (c: Customer) => void;
+  onDeleteCustomer?: (id: string) => void;
 }
 
-export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateCustomer }) => {
+export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateCustomer, onDeleteCustomer }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -132,9 +133,16 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
                             <button onClick={() => setEditingId(null)} className="p-1.5 bg-stone-100 text-stone-600 rounded-lg hover:bg-stone-200"><X size={16} /></button>
                             </>
                         ) : (
-                            <button onClick={() => startEdit(customer)} className="flex items-center gap-1 px-2 py-1 bg-white border border-stone-200 text-stone-500 rounded text-xs hover:text-blue-600 hover:border-blue-200">
-                                <Edit2 size={12} /> 編輯資料
-                            </button>
+                            <div className="flex gap-2">
+                                <button onClick={() => startEdit(customer)} className="flex items-center gap-1 px-2 py-1 bg-white border border-stone-200 text-stone-500 rounded text-xs hover:text-blue-600 hover:border-blue-200">
+                                    <Edit2 size={12} /> 編輯
+                                </button>
+                                {onDeleteCustomer && !customer.isStock && (
+                                    <button onClick={() => onDeleteCustomer(customer.id)} className="flex items-center gap-1 px-2 py-1 bg-white border border-red-200 text-red-400 rounded text-xs hover:bg-red-50 hover:text-red-600">
+                                        <Trash2 size={12} /> 刪除
+                                    </button>
+                                )}
+                            </div>
                         )}
                     </div>
 

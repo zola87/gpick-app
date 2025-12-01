@@ -279,7 +279,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                     <button
                       key={v}
                       onClick={() => setSelectedVariant(v)}
-                      className={`px-4 py-2 rounded-lg text-sm font-bold border-2 transition-all ${selectedVariant === v ? 'bg-blue-500 border-blue-500 text-white shadow-md' : 'border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                      className={`px-4 py-3 rounded-lg text-sm font-bold border-2 transition-all min-w-[3rem] ${selectedVariant === v ? 'bg-blue-500 border-blue-500 text-white shadow-md' : 'border-stone-200 text-stone-600 hover:bg-stone-50'}`}
                     >
                       {v}
                     </button>
@@ -396,34 +396,45 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
             </div>
           )}
           {filteredProducts.map(product => (
-            <div key={product.id} className="flex items-start gap-4 p-3 border border-stone-100 rounded-lg hover:bg-stone-50 transition-colors group relative">
-              <div className="w-24 h-24 bg-stone-100 rounded-md overflow-hidden flex-shrink-0 border border-stone-100">
+            <div key={product.id} className="flex gap-4 p-3 border border-stone-100 rounded-lg hover:bg-stone-50 transition-colors group relative">
+              {/* Image Section - Scaled for mobile */}
+              <div className="w-20 h-20 md:w-24 md:h-24 bg-stone-100 rounded-md overflow-hidden flex-shrink-0 border border-stone-100 self-start">
                 <img src={product.imageUrl} alt={product.name} className="w-full h-full object-contain bg-white" />
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="font-bold text-stone-800 truncate">{product.name}</h4>
-                    {product.brand && <p className="text-xs text-stone-500">{product.brand}</p>}
-                  </div>
-                  <span className="text-xs bg-stone-200 text-stone-600 px-2 py-0.5 rounded-full flex-shrink-0">{product.category}</span>
-                </div>
-                <div className="text-sm text-stone-500 mt-1">
-                  JP: ¥{product.priceJPY} 
-                  {product.variants.length > 0 && <span className="ml-2 text-stone-400">款式: {product.variants.join(', ')}</span>}
-                </div>
-                <div className="mt-3 flex gap-2">
-                   <button onClick={() => setSelectedProduct(product.id)} className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-3 py-1.5 rounded hover:bg-blue-100 flex-1 text-center font-medium">
-                     喊單這件
-                   </button>
-                </div>
-              </div>
-              <div className="text-right flex flex-col justify-between items-end h-24">
-                <div className="text-lg font-bold text-blue-600">NT$ {product.priceTWD}</div>
-                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white p-1 rounded shadow-sm border border-stone-100">
-                     <button onClick={() => setEditingProduct(product)} className="text-stone-400 hover:text-blue-600 p-1"><Edit2 size={16}/></button>
-                     <button onClick={() => onDeleteProduct(product.id)} className="text-stone-400 hover:text-red-500 p-1"><Trash2 size={16}/></button>
-                </div>
+
+              {/* Details Section - Improved Vertical Layout */}
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
+                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1 sm:gap-2">
+                     <h4 className="font-bold text-stone-800 leading-tight">{product.name}</h4>
+                     <span className="text-[10px] bg-stone-200 text-stone-600 px-2 py-0.5 rounded-full self-start sm:self-auto whitespace-nowrap">{product.category}</span>
+                 </div>
+                 
+                 <div className="text-xs text-stone-500 flex flex-wrap gap-2 items-center">
+                      {product.brand && <span className="bg-stone-100 px-1.5 py-0.5 rounded text-stone-600">{product.brand}</span>}
+                      <span className="text-stone-400">¥{product.priceJPY}</span>
+                      {product.variants.length > 0 && <span className="text-stone-400">({product.variants.length} 款)</span>}
+                 </div>
+
+                 <div className="mt-auto pt-2 flex justify-between items-end">
+                     <div className="text-lg font-bold text-blue-600 leading-none">
+                         NT$ {product.priceTWD}
+                     </div>
+                     
+                     <div className="flex items-center gap-2">
+                        {/* Action Buttons */}
+                        <div className="flex gap-1">
+                             <button onClick={() => setEditingProduct(product)} className="p-1.5 rounded bg-white border border-stone-200 text-stone-400 hover:text-blue-600 hover:border-blue-300">
+                                 <Edit2 size={16}/>
+                             </button>
+                             <button onClick={() => onDeleteProduct(product.id)} className="p-1.5 rounded bg-white border border-stone-200 text-stone-400 hover:text-red-600 hover:border-red-300">
+                                 <Trash2 size={16}/>
+                             </button>
+                        </div>
+                        <button onClick={() => setSelectedProduct(product.id)} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-600 hover:text-white transition-colors font-bold ml-1">
+                          喊單
+                        </button>
+                     </div>
+                 </div>
               </div>
             </div>
           ))}

@@ -9,12 +9,13 @@ interface InventoryProps {
   products: Product[];
   onUpdateOrder: (o: Order) => void;
   onAddOrder?: (o: Order, c?: Customer) => void;
+  onDeleteOrder?: (id: string) => void;
 }
 
 // Helper
 const generateId = () => Math.random().toString(36).substring(2, 10);
 
-export const Inventory: React.FC<InventoryProps> = ({ customers, orders, products, onUpdateOrder, onAddOrder }) => {
+export const Inventory: React.FC<InventoryProps> = ({ customers, orders, products, onUpdateOrder, onAddOrder, onDeleteOrder }) => {
   const [activeTab, setActiveTab] = useState<'packing' | 'totals' | 'stock'>('packing');
   const [searchTerm, setSearchTerm] = useState('');
   const [totalsSearchTerm, setTotalsSearchTerm] = useState('');
@@ -146,6 +147,12 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
       setStockProdId('');
       setStockQty(1);
       setStockVariant('');
+  };
+
+  const handleDeleteStockItem = (orderId: string) => {
+      if (onDeleteOrder && window.confirm("確定要刪除此筆現貨嗎？")) {
+          onDeleteOrder(orderId);
+      }
   };
 
   // Filter customers for reassignment dropdown
@@ -369,12 +376,21 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                                         </div>
                                     </div>
                                     
-                                    <button 
-                                        onClick={() => setReassigningOrder(order)}
-                                        className="bg-white border border-stone-200 text-stone-600 px-4 py-2 rounded-lg hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors flex items-center gap-2 text-sm font-medium shadow-sm"
-                                    >
-                                        分配給客人 <ArrowRight size={16} />
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button 
+                                            onClick={() => setReassigningOrder(order)}
+                                            className="bg-white border border-stone-200 text-stone-600 px-4 py-2 rounded-lg hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors flex items-center gap-2 text-sm font-medium shadow-sm"
+                                        >
+                                            分配給客人 <ArrowRight size={16} />
+                                        </button>
+                                        <button 
+                                            onClick={() => handleDeleteStockItem(order.id)}
+                                            className="bg-white border border-red-200 text-red-400 p-2 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
+                                            title="刪除庫存"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
                                 </div>
                             );
                         })}
