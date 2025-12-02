@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { Product, Order, Customer } from "../types";
 
@@ -13,6 +14,7 @@ export const analyzeSalesData = async (
   try {
     const ai = getGeminiClient();
     
+    // Calculate simple profit estimate assuming 0.23 cost rate if not provided, just for analysis
     const totalRev = orders.reduce((acc, o) => {
       const p = products.find(prod => prod.id === o.productId);
       return acc + (p ? p.priceTWD * o.quantity : 0);
@@ -63,12 +65,12 @@ export const smartParseOrder = async (
   input: { text?: string; imageBase64?: string },
   products: Product[],
   customers: Customer[]
-): Promise<Array<{
+): Promise<{
   customerName: string;
   productName: string;
   quantity: number;
   variant?: string;
-}> | null> => {
+} | null> => {
   try {
     const ai = getGeminiClient();
     
@@ -76,35 +78,17 @@ export const smartParseOrder = async (
     const customerList = customers.map(c => `${c.lineName}/${c.nickname}`).join(', ');
 
     const prompt = `
-      You are an expert AI assistant for a Personal Shopper (Daigou).
-      Your task is to analyze a chat screenshot (LINE/Messenger) or text input and extract all valid orders.
-
-      Context:
-      Known Products: ${productList}
-      Known Customers: ${customerList}
-
-      Task:
-      Extract a list of orders. 
-      IMPORTANT: A single image often contains MULTIPLE people ordering different items (e.g. a list of "+1"). 
-      You must extract EVERYONE.
+      You are a parsing assistant for a "Daigou" (Personal Shopper).
+      Identify the Customer Name, Product Name, Variant (Color/Size), and Quantity from the input.
       
-      Input Format Examples you might see:
-      - "Amy +1, Jason +2"
-      - A screenshot of a chat list where multiple people said "+1" or "I want black"
-      - "我要黑色的 1個" (User name might be visible in the chat bubble header)
-
-      Output Format:
-      Return a JSON ARRAY strictly.
-      [
-        { "customerName": "detected_name", "productName": "detected_product", "quantity": number, "variant": "detected_variant" },
-        ...
-      ]
-
+      Existing Products: ${productList}
+      Existing Customers: ${customerList}
+      
       Rules:
-      1. If the customer name is not explicitly in the text but is a chat screenshot, try to infer the sender's name from the bubble.
-      2. If product is not mentioned but context implies (or user selected it in UI), leave productName empty or best guess.
-      3. If quantity is "+1", "＋1", it means 1.
-      4. If no valid orders found, return [].
+      1. If the product name vaguely matches an existing one, use the existing name.
+      2. If the customer vaguely matches, use the existing name.
+      3. Return JSON ONLY. Format: {"customerName": string, "productName": string, "quantity": number, "variant": string}
+      4. If unknown, leave fields as empty string or 0.
     `;
 
     const parts: any[] = [{ text: prompt }];
@@ -113,23 +97,21 @@ export const smartParseOrder = async (
     if (input.imageBase64) {
       parts.push({
         inlineData: {
-          mimeType: 'image/png', 
-          data: input.imageBase64.split(',')[1] 
+          mimeType: 'image/png', // Assuming png/jpeg
+          data: input.imageBase64.split(',')[1] // Remove data:image/...;base64,
         }
       });
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: input.imageBase64 ? 'gemini-2.5-flash' : 'gemini-2.5-flash',
       contents: { parts },
       config: { responseMimeType: "application/json" }
     });
 
     const text = response.text;
     if (!text) return null;
-    
-    const parsed = JSON.parse(text);
-    return Array.isArray(parsed) ? parsed : [parsed];
+    return JSON.parse(text);
 
   } catch (error) {
     console.error("Smart Parse Error", error);

@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, Customer, Order, GlobalSettings } from '../types';
-import { Plus, ShoppingBag, UserPlus, Send, ImageIcon, X, Wand2, Search, Link, Edit2, Trash2, Minus, ChevronDown, Check } from 'lucide-react';
+import { Plus, ShoppingBag, UserPlus, Send, ImageIcon, X, Wand2, Search, Link, Edit2, Trash2, Minus } from 'lucide-react';
 import { smartParseOrder } from '../services/geminiService';
 
 interface LiveSessionProps {
@@ -13,12 +14,12 @@ interface LiveSessionProps {
   onAddOrder: (o: Order, createNewCustomer?: Customer) => void;
 }
 
-// UUID Polyfill
+// UUID Polyfill for non-secure contexts
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
   }
-  return Math.random().toString(36).substring(2, 15);
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 };
 
 export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, settings, onAddProduct, onUpdateProduct, onDeleteProduct, onAddOrder }) => {
@@ -29,7 +30,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
   const [newProdJPY, setNewProdJPY] = useState('');
   const [newProdTWD, setNewProdTWD] = useState('');
   const [newProdCategory, setNewProdCategory] = useState(settings.productCategories[0] || '一般');
-  const [newProdVariants, setNewProdVariants] = useState(''); 
+  const [newProdVariants, setNewProdVariants] = useState(''); // Comma separated
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [isUrlMode, setIsUrlMode] = useState(false);
@@ -38,20 +39,18 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
   const [selectedProduct, setSelectedProduct] = useState<string>('');
   const [selectedVariant, setSelectedVariant] = useState<string>('');
   
-  // Product Search Dropdown State
-  const [isProdDropdownOpen, setIsProdDropdownOpen] = useState(false);
-  const [prodSearchTerm, setProdSearchTerm] = useState('');
-  
-  // Batch Ordering State
+  // Advanced Batch Ordering State
   const [batchOrders, setBatchOrders] = useState<{name: string, qty: number}[]>([{name: '', qty: 1}]);
+  
+  // Autocomplete State
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
   
-  const topRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   
   // Smart Magic State
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  
+  const [smartImage, setSmartImage] = useState<string | null>(null);
+
   // Edit Product Modal State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
@@ -92,8 +91,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
       priceJPY: Number(newProdJPY) || 0,
       priceTWD: Number(newProdTWD),
       category: newProdCategory,
-      // Split by comma, dot, space, Chinese comma
-      variants: newProdVariants ? newProdVariants.split(/[.,\s，、]+/).map(v => v.trim()).filter(v => v) : [],
+      variants: newProdVariants ? newProdVariants.split(',').map(v => v.trim()).filter(v => v) : [],
       imageUrl: isUrlMode ? imageUrlInput : (imagePreview || `https://picsum.photos/200?random=${Math.random()}`),
       createdAt: Date.now()
     };
@@ -108,10 +106,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
     setNewProdVariants('');
     setImagePreview(null);
     setImageUrlInput('');
-    setIsAddProductOpen(false); 
+    setIsAddProductOpen(false); // Close after add
     
     // Auto select
-    handleSelectProduct(newProduct.id);
+    setSelectedProduct(newProduct.id);
   };
 
   const handleSaveEdit = () => {
@@ -121,69 +119,36 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
       }
   };
 
-  const handleSelectProduct = (id: string) => {
-      setSelectedProduct(id);
-      setSelectedVariant('');
-      const prod = products.find(p => p.id === id);
-      if(prod) setProdSearchTerm(prod.name);
-      setIsProdDropdownOpen(false);
-  };
-
-  const scrollToTop = () => {
-      // Small timeout to allow render
-      setTimeout(() => {
-        topRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
-  };
-
-  const handleSmartAnalyze = async (file: File) => {
-    setIsAnalyzing(true);
+  const handleSmartAnalyze = async () => {
+    // Logic for single text input is now a bit different with batch, assume we fill first row
+    const firstRowName = batchOrders[0].name;
     
-    const reader = new FileReader();
-    reader.onload = async () => {
-        const base64 = reader.result as string;
-        
-        // Call Service
-        const results = await smartParseOrder({ 
-            imageBase64: base64
-        }, products, customers);
-        
-        setIsAnalyzing(false);
+    if (!smartImage && !firstRowName) return;
+    
+    setIsAnalyzing(true);
+    const result = await smartParseOrder({ 
+      imageBase64: smartImage || undefined,
+      text: firstRowName || undefined
+    }, products, customers);
+    
+    setIsAnalyzing(false);
+    setSmartImage(null);
 
-        if (results && results.length > 0) {
-            // 1. Identify Product from the first result if possible
-            if (!selectedProduct) {
-                 const firstRes = results[0];
-                 const foundProduct = products.find(p => p.name.includes(firstRes.productName) || firstRes.productName.includes(p.name));
-                 if (foundProduct) {
-                    handleSelectProduct(foundProduct.id);
-                    setProdSearchTerm(foundProduct.name);
-                 }
-            }
-
-            // 2. Fill batch rows
-            const newBatchRows = results.map(r => ({
-                name: r.customerName || '',
-                qty: r.quantity || 1
-            }));
-            
-            // Overwrite existing if empty, else append
-            if (batchOrders.length === 1 && batchOrders[0].name === '') {
-                setBatchOrders(newBatchRows);
-            } else {
-                setBatchOrders([...batchOrders, ...newBatchRows]);
-            }
-            
-            // Set variant if unambiguous
-            if (results.some(r => r.variant) && !selectedVariant) {
-                 const v = results[0].variant;
-                 if(v) setSelectedVariant(v);
-            }
-        } else {
-            alert("AI 無法辨識圖片中的喊單資訊，請確認圖片清晰度或改用手動輸入。");
+    if (result) {
+      if (result.customerName) updateBatchRow(0, 'name', result.customerName);
+      const foundProduct = products.find(p => p.name.includes(result.productName) || result.productName.includes(p.name));
+      if (foundProduct) {
+        setSelectedProduct(foundProduct.id);
+        if (result.variant && foundProduct.variants.includes(result.variant)) {
+           setSelectedVariant(result.variant);
         }
-    };
-    reader.readAsDataURL(file);
+      } else {
+        alert(`未找到商品: ${result.productName}，請先上架或手動選擇。`);
+      }
+      if (result.quantity) updateBatchRow(0, 'qty', result.quantity);
+    } else {
+      alert("無法辨識圖片內容");
+    }
   };
 
   const handleQuickOrder = () => {
@@ -191,11 +156,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
 
     // Filter out empty names
     const validOrders = batchOrders.filter(o => o.name.trim() !== '');
+    
     if(validOrders.length === 0) return;
 
     validOrders.forEach(order => {
-        // Split input by space/comma/dot in case they still use single row for multiple
-        const subNames = order.name.split(/[.,\s，\n]+/).filter(n => n.trim().length > 0);
+        // Split input by space/comma in case they still use the old way in a single row
+        const subNames = order.name.split(/[,\s\n]+/).filter(n => n.trim().length > 0);
         
         subNames.forEach(subName => {
              let customer = customers.find(c => c.lineName === subName || c.nickname === subName);
@@ -227,12 +193,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
         });
     });
 
-    // Reset and Scroll
+    // Reset
     setBatchOrders([{name: '', qty: 1}]);
-    setProdSearchTerm('');
-    setSelectedProduct('');
     setSelectedVariant('');
-    scrollToTop();
   };
 
   // Batch Row Handlers
@@ -258,16 +221,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
   const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())).reverse();
   const currentProduct = products.find(p => p.id === selectedProduct);
   
-  // Product Search Filter (Search + Dropdown)
-  const filteredProductOptions = products.filter(p => p.name.toLowerCase().includes(prodSearchTerm.toLowerCase())).reverse();
-
+  // Validation for Quick Order Button
   const isVariantRequired = currentProduct && currentProduct.variants.length > 0;
   const hasValidRows = batchOrders.some(o => o.name.trim() !== '');
   const isOrderValid = selectedProduct && hasValidRows && (!isVariantRequired || (isVariantRequired && selectedVariant));
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full relative">
-        <div ref={topRef} className="absolute -top-32"></div>
       {/* Left Column: Quick Order */}
       <div className="lg:col-span-1 space-y-4 flex flex-col">
         
@@ -280,7 +240,14 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                <input type="file" accept="image/*" className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-20" 
                  onChange={(e) => {
                    const file = e.target.files?.[0];
-                   if(file) handleSmartAnalyze(file);
+                   if(file) {
+                     const reader = new FileReader();
+                     reader.onload = () => {
+                        setSmartImage(reader.result as string);
+                        setTimeout(() => handleSmartAnalyze(), 100); 
+                     };
+                     reader.readAsDataURL(file);
+                   }
                  }}
                />
                <button className="bg-gradient-to-r from-pink-500 to-rose-500 p-1.5 rounded-full hover:scale-110 transition-transform text-white shadow-md">
@@ -290,45 +257,18 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
           </h2>
 
           <div className="space-y-4">
-            {/* Searchable Product Dropdown */}
-            <div className="relative">
-              <label className="block text-xs text-stone-400 mb-1">選擇商品 (打字搜尋)</label>
-              <div className="relative">
-                  <input 
-                    type="text"
-                    value={prodSearchTerm}
-                    onChange={(e) => {setProdSearchTerm(e.target.value); setIsProdDropdownOpen(true);}}
-                    onFocus={() => setIsProdDropdownOpen(true)}
-                    placeholder="輸入關鍵字..."
-                    className="w-full bg-stone-50 border border-stone-200 rounded-lg py-3 px-3 text-stone-800 focus:ring-2 focus:ring-blue-500 text-base"
-                  />
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" size={16}/>
-              </div>
-              
-              {isProdDropdownOpen && (
-                  <div className="absolute top-full left-0 w-full bg-white border border-stone-200 shadow-xl rounded-lg z-50 mt-1 max-h-60 overflow-y-auto">
-                     {filteredProductOptions.length === 0 ? (
-                         <div className="p-3 text-stone-400 text-sm text-center">無符合商品</div>
-                     ) : (
-                         filteredProductOptions.map(p => (
-                             <button
-                                key={p.id}
-                                className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-stone-50 last:border-0 flex justify-between items-center"
-                                onClick={() => handleSelectProduct(p.id)}
-                             >
-                                 <span className="font-medium text-stone-700 truncate">{p.name}</span>
-                                 <span className="text-blue-600 font-bold text-xs">${p.priceTWD}</span>
-                             </button>
-                         ))
-                     )}
-                     <button 
-                        className="w-full text-center p-2 text-xs text-blue-500 bg-stone-50 font-bold sticky bottom-0"
-                        onClick={() => setIsProdDropdownOpen(false)}
-                     >
-                        關閉選單
-                     </button>
-                  </div>
-              )}
+            <div>
+              <label className="block text-xs text-stone-400 mb-1">選擇商品</label>
+              <select 
+                value={selectedProduct}
+                onChange={(e) => {setSelectedProduct(e.target.value); setSelectedVariant('');}}
+                className="w-full bg-stone-50 border border-stone-200 rounded-lg py-3 px-3 text-stone-800 focus:ring-2 focus:ring-blue-500 text-base"
+              >
+                <option value="">-- 請選擇 --</option>
+                {products.slice().reverse().map(p => (
+                  <option key={p.id} value={p.id}>{p.name} (${p.priceTWD})</option>
+                ))}
+              </select>
             </div>
 
             {currentProduct && currentProduct.variants.length > 0 && (
@@ -358,12 +298,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
               
               <div className="space-y-2 max-h-48 overflow-y-visible pr-1">
                  {batchOrders.map((order, idx) => {
-                     // Autocomplete Suggestions
+                     // Autocomplete Suggestions logic
                      const suggestions = order.name.trim() !== '' && focusedRowIndex === idx
                         ? customers.filter(c => 
                             c.lineName.toLowerCase().includes(order.name.toLowerCase()) || 
                             c.nickname?.toLowerCase().includes(order.name.toLowerCase())
-                          ).filter(c => c.lineName !== order.name).slice(0, 4)
+                          ).filter(c => c.lineName !== order.name).slice(0, 4) // Limit to 4
                         : [];
 
                      return (
@@ -373,10 +313,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                                 type="text" 
                                 value={order.name}
                                 onFocus={() => setFocusedRowIndex(idx)}
-                                onBlur={() => setTimeout(() => setFocusedRowIndex(null), 200)} 
+                                onBlur={() => setTimeout(() => setFocusedRowIndex(null), 200)} // Delay so click handles first
                                 onChange={(e) => updateBatchRow(idx, 'name', e.target.value)}
                                 className="w-full bg-stone-50 border border-stone-200 rounded-lg py-2 px-3 text-stone-800 placeholder-stone-400 focus:ring-2 focus:ring-blue-500 text-sm"
-                                placeholder="客人名稱..."
+                                placeholder="客人名稱 (或現貨區)..."
                             />
                             {/* Dropdown */}
                             {suggestions.length > 0 && (
@@ -462,7 +402,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                 <img src={product.imageUrl} alt={product.name} className="w-full h-full object-contain bg-white" />
               </div>
 
-              {/* Details Section */}
+              {/* Details Section - Improved Vertical Layout */}
               <div className="flex-1 min-w-0 flex flex-col gap-1">
                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1 sm:gap-2">
                      <h4 className="font-bold text-stone-800 leading-tight">{product.name}</h4>
@@ -490,7 +430,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                                  <Trash2 size={16}/>
                              </button>
                         </div>
-                        <button onClick={() => { handleSelectProduct(product.id); scrollToTop(); }} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-600 hover:text-white transition-colors font-bold ml-1">
+                        <button onClick={() => setSelectedProduct(product.id)} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-600 hover:text-white transition-colors font-bold ml-1">
                           喊單
                         </button>
                      </div>
@@ -501,7 +441,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
         </div>
       </div>
 
-      {/* Add Product Modal */}
+      {/* Add Product Modal (New) */}
       {isAddProductOpen && (
           <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -577,7 +517,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                             value={newProdVariants}
                             onChange={e => setNewProdVariants(e.target.value)}
                             className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                            placeholder="款式 (用空格、逗號或點號分隔)"
+                            placeholder="款式 (如: 紅色,藍色,S,M - 逗號分隔)"
                             />
                         </div>
 
@@ -650,6 +590,16 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                       <button onClick={() => setEditingProduct(null)}><X size={20} className="text-stone-400" /></button>
                   </div>
                   <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+                        <div className="text-center">
+                             <div className="relative w-24 h-24 mx-auto border rounded-lg overflow-hidden cursor-pointer group">
+                                <img src={editingProduct.imageUrl} className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Edit2 className="text-white" size={20} />
+                                </div>
+                                <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleImageChange(e, true)} />
+                             </div>
+                             <p className="text-xs text-stone-400 mt-1">點擊更換圖片</p>
+                        </div>
                         <div>
                              <label className="text-xs text-stone-500">商品名稱</label>
                              <input className="w-full border rounded px-3 py-2" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} />
@@ -681,8 +631,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                              </div>
                         </div>
                         <div>
-                             <label className="text-xs text-stone-500">款式 (空格/逗號/點號分隔)</label>
-                             <input className="w-full border rounded px-3 py-2" value={editingProduct.variants.join(' ')} onChange={e => setEditingProduct({...editingProduct, variants: e.target.value.split(/[.,\s，]+/)})} />
+                             <label className="text-xs text-stone-500">款式 (逗號分隔)</label>
+                             <input className="w-full border rounded px-3 py-2" value={editingProduct.variants.join(',')} onChange={e => setEditingProduct({...editingProduct, variants: e.target.value.split(',')})} />
                         </div>
                   </div>
                   <div className="p-4 border-t flex gap-3">

@@ -1,6 +1,6 @@
-import React, { useState, PropsWithChildren } from 'react';
+import React, { useState } from 'react';
 import { GlobalSettings } from '../types';
-import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare, Database, Upload, Share2 } from 'lucide-react';
+import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare, Database, Upload } from 'lucide-react';
 
 interface SettingsProps {
   settings: GlobalSettings;
@@ -11,7 +11,7 @@ interface SettingsProps {
   onImportBackup?: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
-const CollapsibleSection = ({ title, icon: Icon, children, defaultOpen = false }: PropsWithChildren<{ title: string, icon: any, defaultOpen?: boolean }>) => {
+const CollapsibleSection = ({ title, icon: Icon, children, defaultOpen = false }: { title: string, icon: any, children: React.ReactNode, defaultOpen?: boolean }) => {
     const [isOpen, setIsOpen] = useState(defaultOpen);
     return (
         <div className="border border-stone-200 rounded-lg overflow-hidden bg-white">
@@ -226,11 +226,7 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
         </CollapsibleSection>
 
         {/* Backup & Restore (New Section) */}
-        <CollapsibleSection title="資料同步中心 (手動備份)" icon={Database}>
-             <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg mb-4 text-sm text-blue-800 border border-blue-100">
-                 <p className="flex items-center gap-2 font-bold mb-1"><Share2 size={16}/> 關於雲端與備份</p>
-                 <p className="text-blue-600">您的資料已自動同步至雲端。此處功能僅供「手動備份檔案」或「網路異常時」使用。</p>
-             </div>
+        <CollapsibleSection title="資料備份與移轉 (同步)" icon={Database}>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="bg-stone-50 p-4 rounded-lg border border-stone-200 hover:border-blue-300 transition-colors">
                       <h4 className="font-bold text-stone-700 mb-2 flex items-center gap-2">
