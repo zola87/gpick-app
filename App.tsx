@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package } from 'lucide-react';
+import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, Cloud, RefreshCw } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { LiveSession } from './components/LiveSession';
 import { ShoppingList } from './components/ShoppingList';
@@ -9,63 +10,25 @@ import { Settings } from './components/Settings';
 import { Inventory } from './components/Inventory';
 import { Product, Order, Customer, GlobalSettings } from './types';
 
-// Safe ID generator for Init Data
-const safeId = () => Math.random().toString(36).substring(2, 10);
+// Firebase Imports
+import { db } from './services/firebase';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
-// --- Custom Hook for LocalStorage ---
-function useLocalStorage<T>(key: string, initialValue: T) {
-  // State to store our value
-  // Pass initial state function to useState so logic is only executed once
-  const [storedValue, setStoredValue] = useState<T>(() => {
-    if (typeof window === "undefined") {
-      return initialValue;
-    }
-    try {
-      const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
-    } catch (error) {
-      console.log(error);
-      return initialValue;
-    }
-  });
-
-  // Return a wrapped version of useState's setter function that ...
-  // ... persists the new value to localStorage.
-  const setValue = (value: T | ((val: T) => T)) => {
-    try {
-      // Allow value to be a function so we have same API as useState
-      const valueToStore = value instanceof Function ? value(storedValue) : value;
-      
-      // Save state
-      setStoredValue(valueToStore);
-      
-      // Save to local storage
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(key, JSON.stringify(valueToStore));
-      }
-    } catch (error) {
-      console.log(error);
-    }
-  };
-  return [storedValue, setValue] as const;
-}
-
-// Initial Data
-const INITIAL_PRODUCTS: Product[] = [
-  { id: safeId(), name: 'EVE 止痛藥 (白盒)', variants: [], priceJPY: 698, priceTWD: 250, category: '藥妝', brand: 'SS製藥', createdAt: Date.now(), imageUrl: 'https://picsum.photos/200?random=1' },
-];
-
-const INITIAL_CUSTOMERS: Customer[] = [
-  { id: 'stock-001', lineName: '📦 庫存/現貨區', nickname: 'Stock', isStock: true, isBlacklisted: false },
-  { id: safeId(), lineName: 'Amy Chen', nickname: 'Amy', note: 'VIP', isBlacklisted: false },
-  { id: safeId(), lineName: 'Jason Wang', nickname: 'Jason', isBlacklisted: false },
-];
-
-const INITIAL_ORDERS: Order[] = [
-  { id: safeId(), productId: INITIAL_PRODUCTS[0].id, customerId: INITIAL_CUSTOMERS[1].id, quantity: 2, quantityBought: 0, status: 'PENDING', notificationStatus: 'UNNOTIFIED', isArchived: false, timestamp: Date.now() },
-];
-
-const DEFAULT_BILLING_TEMPLATE = `【{{date}} 連線對帳單】
+// Initial Data for Fallback
+const INITIAL_SETTINGS: GlobalSettings = {
+  jpyExchangeRate: 0.23,
+  pricingRules: [
+    { minPrice: 0, maxPrice: 1000, multiplier: 0.38 },
+    { minPrice: 1001, maxPrice: 3000, multiplier: 0.35 },
+    { minPrice: 3001, maxPrice: 5000, multiplier: 0.32 },
+    { minPrice: 5001, maxPrice: 10000, multiplier: 0.30 },
+    { minPrice: 10001, maxPrice: 999999, multiplier: 0.28 },
+  ],
+  shippingFee: 38,
+  freeShippingThreshold: 3000,
+  pickupPayment: 20,
+  productCategories: ['藥妝', '零食', '服飾', '雜貨', '伴手禮', '限定商品'],
+  billingMessageTemplate: `【{{date}} 連線對帳單】
 哈囉 {{name}} 👋
 這是您本次連線購買的商品明細：
 
@@ -82,102 +45,148 @@ const DEFAULT_BILLING_TEMPLATE = `【{{date}} 連線對帳單】
 
 匯款後請填寫此連結並下單賣貨便：
 [您的賣貨便連結]
-收到款項後會盡快為您出貨！謝謝 ❤️`;
+收到款項後會盡快為您出貨！謝謝 ❤️`
+};
 
-const INITIAL_SETTINGS: GlobalSettings = {
-  jpyExchangeRate: 0.23,
-  pricingRules: [
-    { minPrice: 0, maxPrice: 1000, multiplier: 0.38 },
-    { minPrice: 1001, maxPrice: 3000, multiplier: 0.35 },
-    { minPrice: 3001, maxPrice: 5000, multiplier: 0.32 },
-    { minPrice: 5001, maxPrice: 10000, multiplier: 0.30 },
-    { minPrice: 10001, maxPrice: 999999, multiplier: 0.28 },
-  ],
-  shippingFee: 38,
-  freeShippingThreshold: 3000,
-  pickupPayment: 20,
-  productCategories: ['藥妝', '零食', '服飾', '雜貨', '伴手禮', '限定商品'],
-  billingMessageTemplate: DEFAULT_BILLING_TEMPLATE
+const STOCK_CUSTOMER_ID = 'stock-holder';
+const INITIAL_STOCK_CUSTOMER: Customer = { 
+  id: STOCK_CUSTOMER_ID, 
+  lineName: '📦 庫存/現貨區', 
+  nickname: 'Stock', 
+  isStock: true 
 };
 
 function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'live' | 'shopping' | 'billing' | 'crm' | 'settings' | 'inventory'>('live');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isCloudConnected, setIsCloudConnected] = useState(false);
 
-  // Global State with LocalStorage Persistence
-  const [products, setProducts] = useLocalStorage<Product[]>('gpick_products', INITIAL_PRODUCTS);
-  const [customers, setCustomers] = useLocalStorage<Customer[]>('gpick_customers', INITIAL_CUSTOMERS);
-  const [orders, setOrders] = useLocalStorage<Order[]>('gpick_orders', INITIAL_ORDERS);
-  const [settings, setSettings] = useLocalStorage<GlobalSettings>('gpick_settings', INITIAL_SETTINGS);
+  // Real-time State (Synced with Firestore)
+  const [products, setProducts] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [settings, setSettings] = useState<GlobalSettings>(INITIAL_SETTINGS);
 
-  // Ensure Stock Customer Exists (in case local storage is old)
+  // --- Firestore Subscriptions ---
+  
   useEffect(() => {
-    if (!customers.find(c => c.isStock)) {
-       setCustomers(prev => [{ id: 'stock-001', lineName: '📦 庫存/現貨區', nickname: 'Stock', isStock: true, isBlacklisted: false }, ...prev]);
+    // 1. Products
+    const unsubProd = onSnapshot(collection(db, 'products'), (snap) => {
+      setProducts(snap.docs.map(d => d.data() as Product));
+      setIsCloudConnected(true);
+    }, (err) => console.error("Cloud Error (Products):", err));
+
+    // 2. Customers
+    const unsubCust = onSnapshot(collection(db, 'customers'), (snap) => {
+      const data = snap.docs.map(d => d.data() as Customer);
+      setCustomers(data);
+      
+      // Ensure Stock Customer Exists
+      if (data.length > 0 && !data.find(c => c.isStock)) {
+         setDoc(doc(db, 'customers', STOCK_CUSTOMER_ID), INITIAL_STOCK_CUSTOMER);
+      }
+    });
+
+    // 3. Orders
+    const unsubOrder = onSnapshot(collection(db, 'orders'), (snap) => {
+      setOrders(snap.docs.map(d => d.data() as Order));
+    });
+
+    // 4. Settings (Single Doc)
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
+      if (snap.exists()) {
+        setSettings(snap.data() as GlobalSettings);
+      } else {
+        // Init settings if missing
+        setDoc(doc(db, 'settings', 'global'), INITIAL_SETTINGS);
+      }
+    });
+
+    return () => {
+      unsubProd();
+      unsubCust();
+      unsubOrder();
+      unsubSettings();
+    };
+  }, []);
+
+  // --- Handlers (Write to Firestore) ---
+
+  const handleAddProduct = async (newProduct: Product) => {
+    await setDoc(doc(db, 'products', newProduct.id), newProduct);
+  };
+
+  const handleUpdateProduct = async (updatedProduct: Product) => {
+    await setDoc(doc(db, 'products', updatedProduct.id), updatedProduct);
+  };
+
+  const handleDeleteProduct = async (productId: string) => {
+    if (window.confirm('確定要刪除此商品嗎？')) {
+      await deleteDoc(doc(db, 'products', productId));
     }
-  }, [customers, setCustomers]);
-
-  // Handlers
-  const handleAddProduct = (newProduct: Product) => {
-    setProducts(prev => [...prev, newProduct]);
   };
 
-  const handleUpdateProduct = (updatedProduct: Product) => {
-    setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
-  };
-
-  const handleDeleteProduct = (productId: string) => {
-    if (window.confirm('確定要刪除此商品嗎？相關訂單可能會有影響。')) {
-      setProducts(prev => prev.filter(p => p.id !== productId));
-    }
-  };
-
-  const handleAddOrder = (newOrder: Order, newCustomer?: Customer) => {
+  const handleAddOrder = async (newOrder: Order, newCustomer?: Customer) => {
     if (newCustomer) {
-      setCustomers(prev => [...prev, newCustomer]);
+      await setDoc(doc(db, 'customers', newCustomer.id), newCustomer);
     }
-    setOrders(prev => [...prev, newOrder]);
+    await setDoc(doc(db, 'orders', newOrder.id), newOrder);
   };
 
-  const handleUpdateOrder = (updatedOrder: Order) => {
-    setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+  const handleUpdateOrder = async (updatedOrder: Order) => {
+    await setDoc(doc(db, 'orders', updatedOrder.id), updatedOrder);
   };
 
-  const handleDeleteOrder = (orderId: string) => {
-      setOrders(prev => prev.filter(o => o.id !== orderId));
+  const handleDeleteOrder = async (orderId: string) => {
+    await deleteDoc(doc(db, 'orders', orderId));
   };
 
-  const handleUpdateCustomer = (updatedCustomer: Customer) => {
-    setCustomers(prev => prev.map(c => c.id === updatedCustomer.id ? updatedCustomer : c));
+  const handleUpdateCustomer = async (updatedCustomer: Customer) => {
+    await setDoc(doc(db, 'customers', updatedCustomer.id), updatedCustomer);
   };
 
-  const handleDeleteCustomer = (customerId: string) => {
-      if(window.confirm('確定要刪除此顧客資料嗎？此操作無法復原。')) {
-          setCustomers(prev => prev.filter(c => c.id !== customerId));
+  const handleDeleteCustomer = async (customerId: string) => {
+      if(window.confirm('確定要刪除此顧客資料嗎？')) {
+          await deleteDoc(doc(db, 'customers', customerId));
       }
   };
 
-  // Archive all current orders (EXCEPT STOCK) to start a new trip
-  const handleArchiveOrders = () => {
-    const stockCustomerId = customers.find(c => c.isStock)?.id;
+  const handleUpdateSettings = async (newSettings: GlobalSettings) => {
+    await setDoc(doc(db, 'settings', 'global'), newSettings);
+    alert('設定已同步至雲端！');
+  };
+
+  const handleArchiveOrders = async () => {
+    const stockId = customers.find(c => c.isStock)?.id || STOCK_CUSTOMER_ID;
     
-    setOrders(prev => prev.map(o => {
-      // If the order belongs to stock, DO NOT archive it. It persists to next session.
-      if (o.customerId === stockCustomerId) {
-        return o;
-      }
-      return { ...o, isArchived: true };
-    }));
-    alert('已成功封存舊訂單！現貨庫存已保留至新連線。');
+    const batch = writeBatch(db);
+    let count = 0;
+
+    orders.forEach(o => {
+        if (o.customerId === stockId) return; // Skip stock
+        if (!o.isArchived) {
+            count++;
+            const ref = doc(db, 'orders', o.id);
+            batch.update(ref, { isArchived: true });
+        }
+    });
+
+    if (count > 0) {
+        await batch.commit();
+        alert(`已成功封存 ${count} 筆訂單！大家的手機都已同步更新。`);
+    } else {
+        alert("沒有需要封存的訂單。");
+    }
   };
 
+  // CSV Export (Same as before, reading from state)
   const exportToCSV = () => {
     const activeOrders = orders.filter(o => !o.isArchived);
     if (activeOrders.length === 0) {
       alert("目前沒有進行中的訂單可匯出。");
       return;
     }
-
+    // ... CSV logic relies on state 'orders', 'customers', 'products' which are now synced
     const headers = [
       "訂單ID", "顧客名稱", "商品名稱", "款式", "數量", 
       "售價(TWD)", "總金額(TWD)", "日幣原價(JPY)", "預估成本(TWD)", "預估毛利(TWD)", "毛利率(%)",
@@ -187,7 +196,6 @@ function App() {
     const rows = activeOrders.map(o => {
       const customer = customers.find(c => c.id === o.customerId);
       const product = products.find(p => p.id === o.productId);
-      
       const priceTWD = product?.priceTWD || 0;
       const priceJPY = product?.priceJPY || 0;
       const totalRevenue = priceTWD * o.quantity;
@@ -213,7 +221,7 @@ function App() {
       ].map(field => `"${field}"`).join(',');
     });
 
-    const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n'); // Add BOM for Excel
+    const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -224,55 +232,69 @@ function App() {
     document.body.removeChild(link);
   };
 
-  // --- Data Backup & Restore Functions ---
+  // JSON Backup (For Manual Backup)
   const exportBackupJSON = () => {
-    const backupData = {
-      products,
-      customers,
-      orders,
-      settings,
-      timestamp: Date.now(),
-      version: '1.0'
-    };
+    const backupData = { products, customers, orders, settings, timestamp: Date.now(), version: '2.0-cloud' };
     const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `GPick_Backup_${new Date().toISOString().split('T')[0]}.json`;
+    link.download = `GPick_CloudBackup_${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
   };
 
+  // MIGRATION TOOL: Upload JSON to Firestore
   const importBackupJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const data = JSON.parse(event.target?.result as string);
-        
-        // Basic Validation
         if (data.products && data.customers && data.orders) {
-           if(window.confirm('【警告】確定要還原此備份檔嗎？\n\n目前的資料將被「完全覆蓋」，此操作無法復原！')) {
-               setProducts(data.products);
-               setCustomers(data.customers);
-               setOrders(data.orders);
-               if(data.settings) setSettings(data.settings);
-               alert('資料還原成功！系統已更新。');
+           if(window.confirm(`【資料搬家】確定要將備份檔上傳到雲端嗎？\n\n這將會新增：\n+ 商品: ${data.products.length} 筆\n+ 顧客: ${data.customers.length} 筆\n+ 訂單: ${data.orders.length} 筆\n\n請耐心等待上傳完成...`)) {
+               
+               const batchLimit = 500; // Firestore batch limit
+               let opCount = 0;
+               
+               // We will use simple promises for simplicity, or batches if needed. 
+               // For safety and simplicity in this UI, we do distinct writes but warn user to wait.
+               
+               // 1. Settings
+               if(data.settings) await setDoc(doc(db, 'settings', 'global'), data.settings);
+
+               // 2. Customers
+               for (const c of data.customers) {
+                   await setDoc(doc(db, 'customers', c.id), c);
+                   opCount++;
+               }
+               
+               // 3. Products
+               for (const p of data.products) {
+                   await setDoc(doc(db, 'products', p.id), p);
+                   opCount++;
+               }
+
+               // 4. Orders
+               for (const o of data.orders) {
+                   await setDoc(doc(db, 'orders', o.id), o);
+                   opCount++;
+               }
+
+               alert(`資料上傳完成！共處理 ${opCount} 筆資料。\n現在所有裝置都已同步。`);
            }
         } else {
-           alert('錯誤：這不是有效的 GPick 備份檔案。');
+           alert('錯誤：無效的備份檔案。');
         }
       } catch (err) {
-        alert('讀取檔案失敗：檔案可能已損毀。');
+        alert('上傳失敗：' + err);
         console.error(err);
       }
     };
     reader.readAsText(file);
-    // Reset input so same file can be selected again
-    e.target.value = '';
+    e.target.value = ''; 
   };
 
   const NavItem = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
@@ -296,7 +318,10 @@ function App() {
     <div className="min-h-screen bg-stone-50 flex flex-col md:flex-row font-sans text-stone-800">
       {/* Mobile Header */}
       <div className="md:hidden bg-white p-4 flex justify-between items-center shadow-sm z-30 sticky top-0">
-        <h1 className="text-xl font-bold text-blue-600">GPick 賺錢工具</h1>
+        <h1 className="text-xl font-bold text-blue-600 flex items-center gap-2">
+            GPick 賺錢工具 
+            {isCloudConnected ? <Cloud size={16} className="text-green-500"/> : <Cloud size={16} className="text-stone-300"/>}
+        </h1>
         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
           {isMobileMenuOpen ? <X /> : <Menu />}
         </button>
@@ -309,8 +334,16 @@ function App() {
       `}>
         <div className="p-6 border-b border-stone-100 flex justify-between items-center md:block">
           <div>
-            <h1 className="text-2xl font-bold text-blue-600">GPick</h1>
-            <p className="text-xs text-stone-400 mt-1">日貨連線賺錢工具</p>
+            <h1 className="text-2xl font-bold text-blue-600 flex items-center gap-2">
+                GPick 賺錢工具
+            </h1>
+            <div className="flex items-center gap-1 text-xs text-stone-400 mt-1">
+                {isCloudConnected ? (
+                    <span className="text-green-600 flex items-center gap-1"><Cloud size={12}/> 雲端已連線</span>
+                ) : (
+                    <span className="flex items-center gap-1"><RefreshCw size={12} className="animate-spin"/> 連線中...</span>
+                )}
+            </div>
           </div>
           <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-stone-400">
             <X size={24} />
@@ -333,8 +366,16 @@ function App() {
       {/* Main Content Area */}
       <main className="flex-1 p-4 md:p-8 overflow-y-auto h-[calc(100vh-64px)] md:h-screen bg-stone-50 z-0">
         <div className="max-w-7xl mx-auto h-full pb-20 md:pb-0">
+          
           {activeTab === 'dashboard' && (
-            <Dashboard products={products} orders={orders} customers={customers} settings={settings} />
+            <Dashboard 
+              products={products} 
+              orders={orders} 
+              customers={customers} 
+              settings={settings}
+              onExportBackup={exportBackupJSON}
+              onImportBackup={importBackupJSON}
+            />
           )}
           {activeTab === 'crm' && (
              <CRM 
@@ -386,7 +427,7 @@ function App() {
           {activeTab === 'settings' && (
             <Settings 
               settings={settings} 
-              onSave={setSettings} 
+              onSave={handleUpdateSettings} 
               onArchive={handleArchiveOrders} 
               onExport={exportToCSV}
               onExportBackup={exportBackupJSON}
