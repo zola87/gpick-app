@@ -22,11 +22,9 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
   const [payLast5, setPayLast5] = useState('');
 
   const customerBills = useMemo(() => {
-    // Only process orders that are NOT archived (active session)
     const activeOrders = orders.filter(o => !o.isArchived);
 
     const bills = customers.map(customer => {
-      // Basic filtering
       if (searchTerm && !customer.lineName.toLowerCase().includes(searchTerm.toLowerCase()) && !customer.nickname?.toLowerCase().includes(searchTerm.toLowerCase())) {
           return null;
       }
@@ -41,15 +39,11 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         const product = products.find(p => p.id === order.productId);
         if (!product) return null;
         
-        // Use quantity bought if available and status indicates progress, otherwise use quantity
-        // Actually for billing we usually bill what they ordered, or what we bought?
-        // Usually daigou bills what is bought.
-        const billQty = (order.status === 'BOUGHT' || order.status === 'PACKED' || order.status === 'SHIPPED')
-          ? (order.quantityBought || order.quantity) 
+        const billQty = order.status === 'BOUGHT' || order.status === 'PACKED' || order.status === 'SHIPPED' 
+          ? order.quantityBought || order.quantity 
           : order.quantity; 
 
         if (billQty === 0) return null;
-
         if (!order.isPaid) isFullyPaid = false;
 
         const itemTotal = product.priceTWD * billQty;
@@ -70,7 +64,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
       const pickupPayment = settings.pickupPayment; 
 
       let remittanceAmount = 0;
-      
       if (isFreeShipping) {
           remittanceAmount = subtotal - pickupPayment - shippingFee;
       } else {
@@ -78,8 +71,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
       }
 
       if (remittanceAmount < 0) remittanceAmount = 0;
-
-      // Get payment info from first paid order (assuming batch payment)
       const paymentInfo = custOrders.find(o => o.isPaid);
 
       return {
@@ -95,23 +86,22 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         paymentMethod: paymentInfo?.paymentMethod,
         paymentNote: paymentInfo?.paymentNote
       };
-    }).filter(Boolean) as any[];
+    }).filter(Boolean) as NonNullable<typeof bills[0]>[];
 
-    // Sort: Unpaid first (isFullyPaid=false), then Paid (isFullyPaid=true)
+    // Sorting: Unpaid first, then Paid
     return bills.sort((a, b) => {
-        if (a.isFullyPaid === b.isFullyPaid) return 0;
-        return a.isFullyPaid ? 1 : -1;
+        if (a!.isFullyPaid === b!.isFullyPaid) return 0;
+        return a!.isFullyPaid ? 1 : -1;
     });
 
   }, [customers, orders, products, settings, searchTerm]);
 
-  const generateBillText = (bill: NonNullable<typeof customerBills[0]>) => {
+  const generateBillText = (bill: typeof customerBills[0]) => {
     const date = new Date().toLocaleDateString('zh-TW');
     const itemsText = bill.items.map(i => `- ${i.name} ${i.variant ? `(${i.variant})` : ''} x${i.qty} $${i.total}`).join('\n');
     
     const template = settings.billingMessageTemplate || '';
     
-    // Replace variables
     let message = template
       .replace(/{{date}}/g, date)
       .replace(/{{name}}/g, bill.customer.lineName)
@@ -152,8 +142,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
 
   const handleRegisterPayment = () => {
     if(!payingCustomer) return;
-    
-    // Find all orders for this customer in this session and mark paid
     const bill = customerBills.find(b => b?.customer.id === payingCustomer.id);
     if(bill) {
         bill.orders.forEach(o => {
@@ -172,7 +160,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
   const handleAbandonBill = (bill: any) => {
     const stockCustomer = customers.find(c => c.isStock);
     if(!stockCustomer) return;
-
     if(window.confirm(`確定將 ${bill.customer.lineName} 的所有訂單棄單轉入庫存？`)) {
         bill.orders.forEach((o: Order) => {
             onUpdateOrder({
@@ -210,10 +197,9 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
         {customerBills.map((bill) => {
           if (!bill) return null;
-          
           return (
-            <div key={bill.customer.id} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col hover:shadow-md transition-shadow ${bill.isFullyPaid ? 'border-green-300 ring-1 ring-green-100 opacity-80' : 'border-stone-200'}`}>
-              <div className="p-4 bg-stone-50 border-b border-stone-100 flex justify-between items-center">
+            <div key={bill.customer.id} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col hover:shadow-md transition-shadow ${bill.isFullyPaid ? 'border-green-300 ring-1 ring-green-100 opacity-80' : 'border-red-200 ring-1 ring-red-50'}`}>
+              <div className={`p-4 border-b flex justify-between items-center ${bill.isFullyPaid ? 'bg-green-50' : 'bg-red-50/30'}`}>
                 <div className="flex items-center gap-2">
                     <div className="font-bold text-lg text-blue-800">{bill.customer.lineName}</div>
                     {bill.isFullyPaid && <CheckCircle size={18} className="text-green-500" />}
@@ -243,7 +229,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
                     <span>賣貨便支付 (含運)</span>
                     <span>- ${bill.pickupPayment + bill.shippingFee}</span>
                   </div>
-                  <div className="flex justify-between font-bold text-lg text-blue-600 mt-2 bg-blue-50 p-2 rounded">
+                  <div className={`flex justify-between font-bold text-lg mt-2 p-2 rounded ${bill.isFullyPaid ? 'text-stone-400 bg-stone-100' : 'text-blue-600 bg-blue-50'}`}>
                     <span>需匯款</span>
                     <span>${bill.remittanceAmount}</span>
                   </div>
@@ -258,7 +244,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
               </div>
 
               <div className="p-4 bg-stone-50 border-t border-stone-100 grid grid-cols-2 gap-2">
-                 {/* Open Chat */}
                  <button
                    onClick={() => handleOpenChat(bill.customer)}
                    className="col-span-2 py-2 rounded-lg font-bold text-white bg-[#06C755] hover:bg-[#05b34c] text-xs flex items-center justify-center gap-2 shadow-sm"
@@ -266,7 +251,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
                     <MessageCircle size={14} /> 開啟 LINE 對話
                  </button>
 
-                 {/* Left Action: Edit/Copy Text */}
                  <button
                    onClick={() => openEditModal(bill)}
                    className="py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 bg-white border border-blue-200 text-blue-600 hover:bg-blue-50 text-xs"
@@ -274,7 +258,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
                    <Edit size={14} /> 通知訊息
                  </button>
 
-                 {/* Right Action: Pay or Abandon */}
                  {bill.isFullyPaid ? (
                      <button disabled className="py-2 rounded-lg font-bold bg-green-100 text-green-700 text-xs cursor-default flex items-center justify-center gap-1">
                          <Check size={14}/> 已收款
@@ -288,7 +271,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
                      </button>
                  )}
                  
-                 {/* Abandon Button (Small) */}
                  {!bill.isFullyPaid && (
                      <button 
                         onClick={() => handleAbandonBill(bill)}
@@ -303,7 +285,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         })}
       </div>
 
-      {/* Edit Modal */}
       {editingBill && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -320,7 +301,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
                 </div>
                 <div className="p-4 border-t flex gap-3">
                     <button onClick={() => setEditingBill(null)} className="py-2 px-4 text-stone-600 font-medium">取消</button>
-                    
                     <button onClick={handleSaveAndCopy} className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 shadow-md flex items-center justify-center gap-2">
                         <Copy size={16} /> 複製文字
                     </button>
@@ -329,7 +309,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         </div>
       )}
 
-      {/* Payment Modal */}
       {payingCustomer && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
@@ -369,7 +348,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
       {customerBills.length === 0 && (
         <div className="text-center py-20 text-stone-400">
           <DollarSign className="w-16 h-16 mx-auto mb-4 opacity-30" />
-          <p>尚無訂單資料可供結算 (如已封存請開始新連線)</p>
+          <p>尚無訂單資料可供結算</p>
         </div>
       )}
     </div>

@@ -14,7 +14,6 @@ export const analyzeSalesData = async (
   try {
     const ai = getGeminiClient();
     
-    // Calculate simple profit estimate assuming 0.23 cost rate if not provided, just for analysis
     const totalRev = orders.reduce((acc, o) => {
       const p = products.find(prod => prod.id === o.productId);
       return acc + (p ? p.priceTWD * o.quantity : 0);
@@ -65,12 +64,12 @@ export const smartParseOrder = async (
   input: { text?: string; imageBase64?: string },
   products: Product[],
   customers: Customer[]
-): Promise<{
+): Promise<Array<{
   customerName: string;
   productName: string;
   quantity: number;
   variant?: string;
-}[] | null> => {
+}> | null> => {
   try {
     const ai = getGeminiClient();
     
@@ -78,28 +77,33 @@ export const smartParseOrder = async (
     const customerList = customers.map(c => `${c.lineName}/${c.nickname}`).join(', ');
 
     const prompt = `
-      You are a parsing assistant for a "Daigou" (Personal Shopper) analyzing a chat screenshot or text list.
+      You are an expert AI assistant for a Personal Shopper (Daigou).
+      Your task is to analyze a chat screenshot (LINE/Messenger) or text input and extract all valid orders.
+
+      Context:
+      Known Products: ${productList}
+      Known Customers: ${customerList}
+
+      Task:
+      Extract a list of orders. A single image/text might contain MULTIPLE people ordering.
       
-      Goal: Identify ALL orders in the input.
-      Input context: It might be a screenshot of a LINE chat where users say "+1", "Black +2", etc.
-      
-      Existing Products: ${productList}
-      Existing Customers: ${customerList}
-      
-      Rules:
-      1. Return an ARRAY of objects. Each object represents one order line.
-      2. Fields: "customerName", "productName", "quantity" (default 1), "variant" (Color/Size).
-      3. If a line says "Amy +1", customer is "Amy", quantity is 1.
-      4. If a line says "Jason Black +2", customer is "Jason", variant is "Black", quantity is 2.
-      5. Try to match "productName" to Existing Products if possible, otherwise use what's in text.
-      6. Try to match "customerName" to Existing Customers.
-      7. Return JSON ONLY. No markdown formatting.
-      
-      Example Output:
+      Input Format Examples you might see:
+      - "Amy +1, Jason +2"
+      - "我要黑色的 1個" (User name might be visible in the chat bubble header)
+      - A screenshot of a chat list where multiple people said "+1"
+
+      Output Format:
+      Return a JSON ARRAY strictly.
       [
-        {"customerName": "Amy", "productName": "EVE", "quantity": 1, "variant": ""},
-        {"customerName": "Jason", "productName": "EVE", "quantity": 2, "variant": "Black"}
+        { "customerName": "detected_name", "productName": "detected_product", "quantity": number, "variant": "detected_variant" },
+        ...
       ]
+
+      Rules:
+      1. If the customer name is not explicitly in the text but is a chat screenshot, try to infer the sender's name from the bubble.
+      2. If product is not mentioned but context implies (or user selected it in UI), leave productName empty or best guess.
+      3. If quantity is "+1", "＋1", it means 1.
+      4. If no valid orders found, return [].
     `;
 
     const parts: any[] = [{ text: prompt }];
@@ -108,14 +112,14 @@ export const smartParseOrder = async (
     if (input.imageBase64) {
       parts.push({
         inlineData: {
-          mimeType: 'image/png', // Assuming png/jpeg
-          data: input.imageBase64.split(',')[1] // Remove data:image/...;base64,
+          mimeType: 'image/png', 
+          data: input.imageBase64.split(',')[1] 
         }
       });
     }
 
     const response = await ai.models.generateContent({
-      model: input.imageBase64 ? 'gemini-2.5-flash' : 'gemini-2.5-flash',
+      model: 'gemini-2.5-flash',
       contents: { parts },
       config: { responseMimeType: "application/json" }
     });
@@ -123,10 +127,7 @@ export const smartParseOrder = async (
     const text = response.text;
     if (!text) return null;
     
-    // Clean up potential markdown code blocks
-    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    
-    const parsed = JSON.parse(cleanText);
+    const parsed = JSON.parse(text);
     return Array.isArray(parsed) ? parsed : [parsed];
 
   } catch (error) {

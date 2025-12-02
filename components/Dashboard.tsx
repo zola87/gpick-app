@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Product, Order, Customer, GlobalSettings } from '../types';
 import { analyzeSalesData } from '../services/geminiService';
-import { TrendingUp, Users, ShoppingCart, JapaneseYen, Sparkles, Loader, PieChart } from 'lucide-react';
+import { TrendingUp, Users, ShoppingCart, JapaneseYen, Sparkles, Loader, PieChart, Download, Upload, Share2 } from 'lucide-react';
 
 interface DashboardProps {
   products: Product[];
@@ -13,11 +13,11 @@ interface DashboardProps {
   onImportBackup?: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customers, settings }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customers, settings, onExportBackup, onImportBackup }) => {
   const [aiAnalysis, setAiAnalysis] = useState<string>('');
   const [loadingAi, setLoadingAi] = useState(false);
 
-  // We only show stats for the CURRENT (Active) session to help with "Monthly" closing
+  // We only show stats for the CURRENT (Active) session
   const activeOrders = orders.filter(o => !o.isArchived);
 
   // Stats Calculations
@@ -28,7 +28,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
 
   const totalCostTWD = activeOrders.reduce((acc, order) => {
     const product = products.find(p => p.id === order.productId);
-    // Cost = JPY Price * Current Rate * Quantity
     return acc + (product ? (product.priceJPY * settings.jpyExchangeRate * order.quantity) : 0);
   }, 0);
 

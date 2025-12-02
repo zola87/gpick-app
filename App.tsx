@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { Component, useState, useEffect, ReactNode } from 'react';
 import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, Cloud, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { LiveSession } from './components/LiveSession';
@@ -56,7 +57,7 @@ const INITIAL_STOCK_CUSTOMER: Customer = {
 };
 
 interface ErrorBoundaryProps {
-  children?: React.ReactNode;
+  children?: ReactNode;
 }
 
 interface ErrorBoundaryState {
@@ -64,14 +65,10 @@ interface ErrorBoundaryState {
   error: any;
 }
 
-// Error Boundary Component
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = {
-    hasError: false,
-    error: null
-  };
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
 
-  static getDerivedStateFromError(error: any) {
+  static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true, error };
   }
 

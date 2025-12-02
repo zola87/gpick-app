@@ -14,17 +14,15 @@ interface LiveSessionProps {
   onAddOrder: (o: Order, createNewCustomer?: Customer) => void;
 }
 
-// UUID Polyfill for non-secure contexts
+// UUID Polyfill
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
   }
-  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  return Math.random().toString(36).substring(2, 15);
 };
 
 export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, settings, onAddProduct, onUpdateProduct, onDeleteProduct, onAddOrder }) => {
-  const topRef = useRef<HTMLDivElement>(null);
-
   // Product Form State
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
   const [newProdName, setNewProdName] = useState('');
@@ -32,7 +30,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
   const [newProdJPY, setNewProdJPY] = useState('');
   const [newProdTWD, setNewProdTWD] = useState('');
   const [newProdCategory, setNewProdCategory] = useState(settings.productCategories[0] || '一般');
-  const [newProdVariants, setNewProdVariants] = useState(''); // Comma/Dot separated
+  const [newProdVariants, setNewProdVariants] = useState(''); 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [isUrlMode, setIsUrlMode] = useState(false);
@@ -40,21 +38,21 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
   // Order Form State
   const [selectedProduct, setSelectedProduct] = useState<string>('');
   const [selectedVariant, setSelectedVariant] = useState<string>('');
-  const [productSearchTerm, setProductSearchTerm] = useState('');
-  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   
-  // Advanced Batch Ordering State
+  // Product Search Dropdown State
+  const [isProdDropdownOpen, setIsProdDropdownOpen] = useState(false);
+  const [prodSearchTerm, setProdSearchTerm] = useState('');
+  
+  // Batch Ordering State
   const [batchOrders, setBatchOrders] = useState<{name: string, qty: number}[]>([{name: '', qty: 1}]);
-  
-  // Autocomplete State
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
   
+  const topRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   
   // Smart Magic State
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [smartImage, setSmartImage] = useState<string | null>(null);
-
+  
   // Edit Product Modal State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
@@ -95,8 +93,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
       priceJPY: Number(newProdJPY) || 0,
       priceTWD: Number(newProdTWD),
       category: newProdCategory,
-      // Handle variants with multiple delimiters (dot, comma, space)
-      variants: newProdVariants ? newProdVariants.split(/[.,\s，]+/).map(v => v.trim()).filter(v => v) : [],
+      // Split by comma, dot, space, Chinese comma
+      variants: newProdVariants ? newProdVariants.split(/[.,\s，、]+/).map(v => v.trim()).filter(v => v) : [],
       imageUrl: isUrlMode ? imageUrlInput : (imagePreview || `https://picsum.photos/200?random=${Math.random()}`),
       createdAt: Date.now()
     };
@@ -111,13 +109,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
     setNewProdVariants('');
     setImagePreview(null);
     setImageUrlInput('');
-    setIsAddProductOpen(false); // Close after add
+    setIsAddProductOpen(false); 
     
     // Auto select
-    setSelectedProduct(newProduct.id);
-    setProductSearchTerm(newProduct.name);
-    // Scroll to top to continue ordering
-    scrollToTop();
+    handleSelectProduct(newProduct.id);
   };
 
   const handleSaveEdit = () => {
@@ -127,58 +122,69 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
       }
   };
 
-  const scrollToTop = () => {
-      if (topRef.current) {
-          topRef.current.scrollIntoView({ behavior: 'smooth' });
-      }
+  const handleSelectProduct = (id: string) => {
+      setSelectedProduct(id);
+      setSelectedVariant('');
+      const prod = products.find(p => p.id === id);
+      if(prod) setProdSearchTerm(prod.name);
+      setIsProdDropdownOpen(false);
   };
 
-  const handleSmartAnalyze = async () => {
-    if (!smartImage) return;
-    
+  const scrollToTop = () => {
+      // Small timeout to allow render
+      setTimeout(() => {
+        topRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+  };
+
+  const handleSmartAnalyze = async (file: File) => {
     setIsAnalyzing(true);
-    const results = await smartParseOrder({ 
-      imageBase64: smartImage || undefined
-    }, products, customers);
     
-    setIsAnalyzing(false);
-    setSmartImage(null);
+    const reader = new FileReader();
+    reader.onload = async () => {
+        const base64 = reader.result as string;
+        
+        // Call Service
+        const results = await smartParseOrder({ 
+            imageBase64: base64
+        }, products, customers);
+        
+        setIsAnalyzing(false);
 
-    if (results && results.length > 0) {
-      // Handle Product - Attempt to match the first product found
-      // Note: In a complex scenario, different rows might have different products, 
-      // but UI currently supports 1 product per batch submission. 
-      // We will assume the screenshot is about ONE product, or we pick the first one detected.
-      
-      const firstResult = results[0];
-      const foundProduct = products.find(p => p.name.includes(firstResult.productName) || firstResult.productName.includes(p.name));
-      
-      if (foundProduct) {
-        setSelectedProduct(foundProduct.id);
-        setProductSearchTerm(foundProduct.name);
-        // Try to match variant
-        if (firstResult.variant && foundProduct.variants.includes(firstResult.variant)) {
-           setSelectedVariant(firstResult.variant);
+        if (results && results.length > 0) {
+            // 1. Identify Product from the first result if possible
+            if (!selectedProduct) {
+                 const firstRes = results[0];
+                 const foundProduct = products.find(p => p.name.includes(firstRes.productName) || firstRes.productName.includes(p.name));
+                 if (foundProduct) {
+                    handleSelectProduct(foundProduct.id);
+                    setProdSearchTerm(foundProduct.name);
+                 }
+            }
+
+            // 2. Fill batch rows
+            const newBatchRows = results.map(r => ({
+                name: r.customerName || '',
+                qty: r.quantity || 1
+            }));
+            
+            // Overwrite existing if empty, else append
+            if (batchOrders.length === 1 && batchOrders[0].name === '') {
+                setBatchOrders(newBatchRows);
+            } else {
+                setBatchOrders([...batchOrders, ...newBatchRows]);
+            }
+            
+            // Set variant if unambiguous
+            if (results.some(r => r.variant) && !selectedVariant) {
+                 const v = results[0].variant;
+                 if(v) setSelectedVariant(v);
+            }
+        } else {
+            alert("AI 無法辨識圖片中的喊單資訊，請確認圖片清晰度或改用手動輸入。");
         }
-      } else {
-        // Product not found, maybe alert user to add it first or select manually
-        // We still fill the customer names though
-        if(firstResult.productName) {
-            alert(`提示: 圖片中偵測到商品 "${firstResult.productName}" 但系統找不到，請手動選擇。`);
-        }
-      }
-
-      // Fill Batch Rows
-      const newBatchOrders = results.map(r => ({
-          name: r.customerName || '',
-          qty: r.quantity || 1
-      }));
-      setBatchOrders(newBatchOrders);
-      scrollToTop();
-
-    } else {
-      alert("無法辨識圖片內容或無效格式");
-    }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleQuickOrder = () => {
@@ -186,12 +192,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
 
     // Filter out empty names
     const validOrders = batchOrders.filter(o => o.name.trim() !== '');
-    
     if(validOrders.length === 0) return;
 
     validOrders.forEach(order => {
-        // Split input by space/comma in case they still use the old way in a single row
-        const subNames = order.name.split(/[,\s\n]+/).filter(n => n.trim().length > 0);
+        // Split input by space/comma/dot in case they still use single row for multiple
+        const subNames = order.name.split(/[.,\s，\n]+/).filter(n => n.trim().length > 0);
         
         subNames.forEach(subName => {
              let customer = customers.find(c => c.lineName === subName || c.nickname === subName);
@@ -223,17 +228,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
         });
     });
 
-    // Reset and Scroll to top
+    // Reset and Scroll
     setBatchOrders([{name: '', qty: 1}]);
+    setProdSearchTerm('');
+    setSelectedProduct('');
     setSelectedVariant('');
     scrollToTop();
-  };
-
-  const handleSelectProductFromCard = (p: Product) => {
-      setSelectedProduct(p.id);
-      setProductSearchTerm(p.name);
-      setSelectedVariant('');
-      scrollToTop();
   };
 
   // Batch Row Handlers
@@ -259,16 +259,16 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
   const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())).reverse();
   const currentProduct = products.find(p => p.id === selectedProduct);
   
-  // Product Dropdown Search
-  const filteredProductOptions = products.filter(p => p.name.toLowerCase().includes(productSearchTerm.toLowerCase())).reverse();
+  // Product Search Filter (Search + Dropdown)
+  const filteredProductOptions = products.filter(p => p.name.toLowerCase().includes(prodSearchTerm.toLowerCase())).reverse();
 
-  // Validation for Quick Order Button
   const isVariantRequired = currentProduct && currentProduct.variants.length > 0;
   const hasValidRows = batchOrders.some(o => o.name.trim() !== '');
   const isOrderValid = selectedProduct && hasValidRows && (!isVariantRequired || (isVariantRequired && selectedVariant));
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full relative" ref={topRef}>
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full relative">
+        <div ref={topRef} className="absolute -top-32"></div>
       {/* Left Column: Quick Order */}
       <div className="lg:col-span-1 space-y-4 flex flex-col">
         
@@ -277,18 +277,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
           <h2 className="text-lg font-bold mb-4 flex items-center justify-between text-blue-600">
             <span className="flex items-center"><UserPlus className="w-5 h-5 mr-2" /> 快速喊單</span>
             {/* Smart Parse Trigger */}
-            <div className="relative overflow-hidden inline-block w-8 h-8 group" title="上傳截圖自動喊單">
+            <div className="relative overflow-hidden inline-block w-8 h-8">
                <input type="file" accept="image/*" className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-20" 
                  onChange={(e) => {
                    const file = e.target.files?.[0];
-                   if(file) {
-                     const reader = new FileReader();
-                     reader.onload = () => {
-                        setSmartImage(reader.result as string);
-                        setTimeout(() => handleSmartAnalyze(), 100); 
-                     };
-                     reader.readAsDataURL(file);
-                   }
+                   if(file) handleSmartAnalyze(file);
                  }}
                />
                <button className="bg-gradient-to-r from-pink-500 to-rose-500 p-1.5 rounded-full hover:scale-110 transition-transform text-white shadow-md">
@@ -300,48 +293,41 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
           <div className="space-y-4">
             {/* Searchable Product Dropdown */}
             <div className="relative">
-              <label className="block text-xs text-stone-400 mb-1">選擇商品</label>
-              <div 
-                  className="w-full bg-stone-50 border border-stone-200 rounded-lg py-2 px-3 flex justify-between items-center cursor-pointer hover:border-blue-300 transition-colors"
-                  onClick={() => setIsProductDropdownOpen(!isProductDropdownOpen)}
-              >
+              <label className="block text-xs text-stone-400 mb-1">選擇商品 (打字搜尋)</label>
+              <div className="relative">
                   <input 
-                      type="text" 
-                      placeholder="搜尋或選擇商品..."
-                      value={productSearchTerm}
-                      onChange={(e) => {
-                          setProductSearchTerm(e.target.value);
-                          setIsProductDropdownOpen(true);
-                      }}
-                      className="bg-transparent outline-none w-full text-stone-800 font-medium"
-                      onClick={(e) => e.stopPropagation()} // Allow input focus without toggling immediately
-                      onFocus={() => setIsProductDropdownOpen(true)}
+                    type="text"
+                    value={prodSearchTerm}
+                    onChange={(e) => {setProdSearchTerm(e.target.value); setIsProdDropdownOpen(true);}}
+                    onFocus={() => setIsProdDropdownOpen(true)}
+                    placeholder="輸入關鍵字..."
+                    className="w-full bg-stone-50 border border-stone-200 rounded-lg py-3 px-3 text-stone-800 focus:ring-2 focus:ring-blue-500 text-base"
                   />
-                  <ChevronDown size={16} className="text-stone-400"/>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" size={16}/>
               </div>
               
-              {isProductDropdownOpen && (
+              {isProdDropdownOpen && (
                   <div className="absolute top-full left-0 w-full bg-white border border-stone-200 shadow-xl rounded-lg z-50 mt-1 max-h-60 overflow-y-auto">
-                      {filteredProductOptions.map(p => (
-                          <div 
-                              key={p.id}
-                              className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-stone-50 last:border-0"
-                              onClick={() => {
-                                  setSelectedProduct(p.id);
-                                  setProductSearchTerm(p.name);
-                                  setSelectedVariant('');
-                                  setIsProductDropdownOpen(false);
-                              }}
-                          >
-                              <div className="flex justify-between items-center">
-                                  <span className="font-medium text-stone-800 text-sm">{p.name}</span>
-                                  <span className="text-xs text-stone-500">${p.priceTWD}</span>
-                              </div>
-                          </div>
-                      ))}
-                      {filteredProductOptions.length === 0 && (
-                          <div className="p-3 text-center text-stone-400 text-xs">無符合商品</div>
-                      )}
+                     {filteredProductOptions.length === 0 ? (
+                         <div className="p-3 text-stone-400 text-sm text-center">無符合商品</div>
+                     ) : (
+                         filteredProductOptions.map(p => (
+                             <button
+                                key={p.id}
+                                className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-stone-50 last:border-0 flex justify-between items-center"
+                                onClick={() => handleSelectProduct(p.id)}
+                             >
+                                 <span className="font-medium text-stone-700 truncate">{p.name}</span>
+                                 <span className="text-blue-600 font-bold text-xs">${p.priceTWD}</span>
+                             </button>
+                         ))
+                     )}
+                     <button 
+                        className="w-full text-center p-2 text-xs text-blue-500 bg-stone-50 font-bold sticky bottom-0"
+                        onClick={() => setIsProdDropdownOpen(false)}
+                     >
+                        關閉選單
+                     </button>
                   </div>
               )}
             </div>
@@ -354,7 +340,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                     <button
                       key={v}
                       onClick={() => setSelectedVariant(v)}
-                      className={`px-3 py-2 rounded-lg text-sm font-bold border-2 transition-all min-w-[3rem] ${selectedVariant === v ? 'bg-blue-500 border-blue-500 text-white shadow-md transform scale-105' : 'border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                      className={`px-4 py-3 rounded-lg text-sm font-bold border-2 transition-all min-w-[3rem] ${selectedVariant === v ? 'bg-blue-500 border-blue-500 text-white shadow-md' : 'border-stone-200 text-stone-600 hover:bg-stone-50'}`}
                     >
                       {v}
                     </button>
@@ -373,12 +359,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
               
               <div className="space-y-2 max-h-48 overflow-y-visible pr-1">
                  {batchOrders.map((order, idx) => {
-                     // Autocomplete Suggestions logic
+                     // Autocomplete Suggestions
                      const suggestions = order.name.trim() !== '' && focusedRowIndex === idx
                         ? customers.filter(c => 
                             c.lineName.toLowerCase().includes(order.name.toLowerCase()) || 
                             c.nickname?.toLowerCase().includes(order.name.toLowerCase())
-                          ).filter(c => c.lineName !== order.name).slice(0, 4) // Limit to 4
+                          ).filter(c => c.lineName !== order.name).slice(0, 4)
                         : [];
 
                      return (
@@ -388,10 +374,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                                 type="text" 
                                 value={order.name}
                                 onFocus={() => setFocusedRowIndex(idx)}
-                                onBlur={() => setTimeout(() => setFocusedRowIndex(null), 200)} // Delay so click handles first
+                                onBlur={() => setTimeout(() => setFocusedRowIndex(null), 200)} 
                                 onChange={(e) => updateBatchRow(idx, 'name', e.target.value)}
                                 className="w-full bg-stone-50 border border-stone-200 rounded-lg py-2 px-3 text-stone-800 placeholder-stone-400 focus:ring-2 focus:ring-blue-500 text-sm"
-                                placeholder="客人名稱 (或現貨區)..."
+                                placeholder="客人名稱..."
                             />
                             {/* Dropdown */}
                             {suggestions.length > 0 && (
@@ -399,11 +385,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                                     {suggestions.map(s => (
                                         <button 
                                             key={s.id}
-                                            className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b border-stone-50 last:border-0 flex justify-between"
+                                            className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b border-stone-50 last:border-0"
                                             onClick={() => updateBatchRow(idx, 'name', s.lineName)}
                                         >
                                             <span className="font-medium text-stone-700">{s.lineName}</span>
-                                            {s.nickname && <span className="text-xs text-stone-400">({s.nickname})</span>}
+                                            {s.nickname && <span className="text-xs text-stone-400 ml-2">({s.nickname})</span>}
                                         </button>
                                     ))}
                                 </div>
@@ -477,7 +463,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                 <img src={product.imageUrl} alt={product.name} className="w-full h-full object-contain bg-white" />
               </div>
 
-              {/* Details Section - Improved Vertical Layout */}
+              {/* Details Section */}
               <div className="flex-1 min-w-0 flex flex-col gap-1">
                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1 sm:gap-2">
                      <h4 className="font-bold text-stone-800 leading-tight">{product.name}</h4>
@@ -505,7 +491,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                                  <Trash2 size={16}/>
                              </button>
                         </div>
-                        <button onClick={() => handleSelectProductFromCard(product)} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-600 hover:text-white transition-colors font-bold ml-1">
+                        <button onClick={() => { handleSelectProduct(product.id); scrollToTop(); }} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-600 hover:text-white transition-colors font-bold ml-1">
                           喊單
                         </button>
                      </div>
@@ -516,7 +502,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
         </div>
       </div>
 
-      {/* Add Product Modal (New) */}
+      {/* Add Product Modal */}
       {isAddProductOpen && (
           <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -592,7 +578,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                             value={newProdVariants}
                             onChange={e => setNewProdVariants(e.target.value)}
                             className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                            placeholder="款式 (如: 紅色.藍色.M - 點/逗號/空格分隔)"
+                            placeholder="款式 (用空格、逗號或點號分隔)"
                             />
                         </div>
 
@@ -665,16 +651,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                       <button onClick={() => setEditingProduct(null)}><X size={20} className="text-stone-400" /></button>
                   </div>
                   <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
-                        <div className="text-center">
-                             <div className="relative w-24 h-24 mx-auto border rounded-lg overflow-hidden cursor-pointer group">
-                                <img src={editingProduct.imageUrl} className="w-full h-full object-cover" />
-                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Edit2 className="text-white" size={20} />
-                                </div>
-                                <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleImageChange(e, true)} />
-                             </div>
-                             <p className="text-xs text-stone-400 mt-1">點擊更換圖片</p>
-                        </div>
                         <div>
                              <label className="text-xs text-stone-500">商品名稱</label>
                              <input className="w-full border rounded px-3 py-2" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} />
@@ -706,12 +682,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                              </div>
                         </div>
                         <div>
-                             <label className="text-xs text-stone-500">款式 (逗號/點號/空格分隔)</label>
-                             <input 
-                                className="w-full border rounded px-3 py-2" 
-                                value={editingProduct.variants.join(', ')} 
-                                onChange={e => setEditingProduct({...editingProduct, variants: e.target.value.split(/[.,\s，]+/).filter(v=>v)})} 
-                             />
+                             <label className="text-xs text-stone-500">款式 (空格/逗號/點號分隔)</label>
+                             <input className="w-full border rounded px-3 py-2" value={editingProduct.variants.join(' ')} onChange={e => setEditingProduct({...editingProduct, variants: e.target.value.split(/[.,\s，]+/)})} />
                         </div>
                   </div>
                   <div className="p-4 border-t flex gap-3">
