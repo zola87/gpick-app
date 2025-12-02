@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { Product, Order, Customer } from "../types";
 
@@ -85,12 +84,14 @@ export const smartParseOrder = async (
       Known Customers: ${customerList}
 
       Task:
-      Extract a list of orders. A single image/text might contain MULTIPLE people ordering.
+      Extract a list of orders. 
+      IMPORTANT: A single image often contains MULTIPLE people ordering different items (e.g. a list of "+1"). 
+      You must extract EVERYONE.
       
       Input Format Examples you might see:
       - "Amy +1, Jason +2"
+      - A screenshot of a chat list where multiple people said "+1" or "I want black"
       - "我要黑色的 1個" (User name might be visible in the chat bubble header)
-      - A screenshot of a chat list where multiple people said "+1"
 
       Output Format:
       Return a JSON ARRAY strictly.

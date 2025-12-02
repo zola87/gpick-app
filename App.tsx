@@ -1,5 +1,4 @@
-
-import React, { Component, useState, useEffect, ReactNode } from 'react';
+import React, { useState, useEffect, ReactNode, Component } from 'react';
 import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, Cloud, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { LiveSession } from './components/LiveSession';
@@ -459,8 +458,6 @@ function App() {
               orders={orders} 
               customers={customers} 
               settings={settings}
-              onExportBackup={exportBackupJSON}
-              onImportBackup={importBackupJSON}
             />
           )}
           {activeTab === 'crm' && (

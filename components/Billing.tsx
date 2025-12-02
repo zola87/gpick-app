@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState } from 'react';
 import { Customer, Order, Product, GlobalSettings } from '../types';
 import { Copy, Check, DollarSign, Edit, X, Search, CheckCircle, CreditCard, AlertTriangle, MessageCircle } from 'lucide-react';

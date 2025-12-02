@@ -1,4 +1,3 @@
-
 import React, { useState, PropsWithChildren } from 'react';
 import { GlobalSettings } from '../types';
 import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare, Database, Upload, Share2 } from 'lucide-react';

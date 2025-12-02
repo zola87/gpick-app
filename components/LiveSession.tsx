@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, Customer, Order, GlobalSettings } from '../types';
 import { Plus, ShoppingBag, UserPlus, Send, ImageIcon, X, Wand2, Search, Link, Edit2, Trash2, Minus, ChevronDown, Check } from 'lucide-react';

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Product, Order, Customer } from '../types';
 import { CheckCircle, Circle, MapPin, Search, ChevronDown, ChevronUp, Bell, Check } from 'lucide-react';

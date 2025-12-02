@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
 import { Product, Order, Customer, GlobalSettings } from '../types';
 import { analyzeSalesData } from '../services/geminiService';
-import { TrendingUp, Users, ShoppingCart, JapaneseYen, Sparkles, Loader, PieChart, Download, Upload, Share2 } from 'lucide-react';
+import { TrendingUp, Users, ShoppingCart, JapaneseYen, Sparkles, Loader, PieChart } from 'lucide-react';
 
 interface DashboardProps {
   products: Product[];
@@ -13,7 +12,7 @@ interface DashboardProps {
   onImportBackup?: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customers, settings, onExportBackup, onImportBackup }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customers, settings }) => {
   const [aiAnalysis, setAiAnalysis] = useState<string>('');
   const [loadingAi, setLoadingAi] = useState(false);
 
