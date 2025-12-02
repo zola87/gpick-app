@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Product, Order, Customer } from '../types';
 import { CheckCircle, Circle, MapPin, Search, ChevronDown, ChevronUp, Bell, Check } from 'lucide-react';
@@ -92,7 +91,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
             />
           </div>
         </div>
-        <p className="text-blue-100 text-xs">依喊單順序分配，輸入實際購買數量即可自動分配。點擊鈴鐺標記通知。</p>
+        <p className="text-blue-100 text-xs">依喊單順序分配，輸入實際購買數量即可自動分配。綠色代表有分配到。</p>
       </div>
       
       <div className="bg-white shadow-md rounded-b-xl overflow-hidden min-h-[500px]">
@@ -127,7 +126,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                         </div>
                         <div className="text-sm text-stone-500 mt-1 flex gap-4">
                            <span>總需: <b className="text-stone-800">{item.totalNeeded}</b></span>
-                           <span className={item.totalBought < item.totalNeeded ? "text-pink-500" : "text-green-600"}>
+                           <span className={item.totalBought < item.totalNeeded ? "text-pink-500" : "text-green-600 font-bold"}>
                              已買: {item.totalBought}
                            </span>
                         </div>
@@ -164,13 +163,19 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                         {item.orders.map((order, idx) => {
                           const customer = customers.find(c => c.id === order.customerId);
                           const isFullyAllocated = order.quantityBought >= order.quantity;
+                          const isPartiallyAllocated = order.quantityBought > 0 && order.quantityBought < order.quantity;
                           const isNotified = order.notificationStatus === 'NOTIFIED';
                           
+                          // Visual Logic: Green if allocated, Red if pending
+                          let statusColorClass = 'text-red-400';
+                          if (isFullyAllocated) statusColorClass = 'text-green-600';
+                          else if (isPartiallyAllocated) statusColorClass = 'text-amber-500';
+
                           return (
-                            <div key={order.id} className="flex justify-between items-center text-sm py-2 border-b border-stone-200 last:border-0 hover:bg-white rounded px-2 transition-colors">
+                            <div key={order.id} className={`flex justify-between items-center text-sm py-2 border-b border-stone-200 last:border-0 rounded px-2 transition-colors ${isFullyAllocated ? 'bg-green-50/50' : 'bg-white'}`}>
                               <div className="flex items-center gap-3">
                                 <span className="text-stone-400 w-4 text-xs">#{idx + 1}</span>
-                                <span className={isFullyAllocated ? 'text-stone-700 font-medium' : 'text-stone-400'}>
+                                <span className={`font-bold ${isFullyAllocated ? 'text-stone-800' : 'text-stone-400'}`}>
                                   {customer?.lineName || 'Unknown'}
                                 </span>
                               </div>
@@ -178,8 +183,8 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                                 <div className="flex items-center gap-2">
                                     <span className="text-stone-500">喊 {order.quantity}</span>
                                     <span className="text-stone-300">→</span>
-                                    <span className={`font-bold ${isFullyAllocated ? 'text-green-600' : 'text-pink-500'}`}>
-                                    分 {order.quantityBought}
+                                    <span className={`font-bold ${statusColorClass}`}>
+                                    {isFullyAllocated ? 'OK' : isPartiallyAllocated ? `分 ${order.quantityBought}` : '缺貨'}
                                     </span>
                                 </div>
                                 <button 

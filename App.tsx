@@ -1,6 +1,5 @@
-
-import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, Cloud, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, ReactNode, Component } from 'react';
+import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, Cloud, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { LiveSession } from './components/LiveSession';
 import { ShoppingList } from './components/ShoppingList';
@@ -56,10 +55,58 @@ const INITIAL_STOCK_CUSTOMER: Customer = {
   isStock: true 
 };
 
+interface ErrorBoundaryProps {
+  children?: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: any;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-stone-50 flex items-center justify-center p-6">
+            <div className="bg-white max-w-md w-full p-8 rounded-xl shadow-lg border border-red-200 text-center">
+                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <AlertTriangle className="text-red-500 w-8 h-8" />
+                </div>
+                <h2 className="text-xl font-bold text-stone-800 mb-2">發生預期外的錯誤</h2>
+                <p className="text-stone-600 mb-6 text-sm break-all">{this.state.error?.message}</p>
+                <button 
+                  onClick={() => window.location.reload()} 
+                  className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700"
+                >
+                  重新整理頁面
+                </button>
+            </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'live' | 'shopping' | 'billing' | 'crm' | 'settings' | 'inventory'>('live');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCloudConnected, setIsCloudConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   // Real-time State (Synced with Firestore)
   const [products, setProducts] = useState<Product[]>([]);
@@ -70,43 +117,66 @@ function App() {
   // --- Firestore Subscriptions ---
   
   useEffect(() => {
-    // 1. Products
-    const unsubProd = onSnapshot(collection(db, 'products'), (snap) => {
-      setProducts(snap.docs.map(d => d.data() as Product));
-      setIsCloudConnected(true);
-    }, (err) => console.error("Cloud Error (Products):", err));
+    let unsubProd: () => void;
+    let unsubCust: () => void;
+    let unsubOrder: () => void;
+    let unsubSettings: () => void;
 
-    // 2. Customers
-    const unsubCust = onSnapshot(collection(db, 'customers'), (snap) => {
-      const data = snap.docs.map(d => d.data() as Customer);
-      setCustomers(data);
-      
-      // Ensure Stock Customer Exists
-      if (data.length > 0 && !data.find(c => c.isStock)) {
-         setDoc(doc(db, 'customers', STOCK_CUSTOMER_ID), INITIAL_STOCK_CUSTOMER);
-      }
-    });
+    try {
+        // Check if db is initialized
+        if (!db) throw new Error("Firebase DB not initialized");
 
-    // 3. Orders
-    const unsubOrder = onSnapshot(collection(db, 'orders'), (snap) => {
-      setOrders(snap.docs.map(d => d.data() as Order));
-    });
+        // 1. Products
+        unsubProd = onSnapshot(collection(db, 'products'), (snap) => {
+          setProducts(snap.docs.map(d => d.data() as Product));
+          setIsCloudConnected(true);
+          setConnectionError(null);
+        }, (err) => {
+          console.error("Cloud Error (Products):", err);
+          if (err.code === 'permission-denied') {
+             setConnectionError("權限錯誤：無法讀取資料庫。請確認 Firebase 規則已設為 'allow read, write: if true;'");
+          } else if (err.message.includes("Service firestore is not available")) {
+             setConnectionError("連線錯誤：Firebase 服務無法使用。請檢查 importmap 設定。");
+          } else {
+             setConnectionError(`連線錯誤：${err.message}`);
+          }
+        });
 
-    // 4. Settings (Single Doc)
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
-      if (snap.exists()) {
-        setSettings(snap.data() as GlobalSettings);
-      } else {
-        // Init settings if missing
-        setDoc(doc(db, 'settings', 'global'), INITIAL_SETTINGS);
-      }
-    });
+        // 2. Customers
+        unsubCust = onSnapshot(collection(db, 'customers'), (snap) => {
+          const data = snap.docs.map(d => d.data() as Customer);
+          setCustomers(data);
+          
+          // Ensure Stock Customer Exists
+          if (data.length > 0 && !data.find(c => c.isStock)) {
+             setDoc(doc(db, 'customers', STOCK_CUSTOMER_ID), INITIAL_STOCK_CUSTOMER).catch(e => console.error(e));
+          }
+        });
+
+        // 3. Orders
+        unsubOrder = onSnapshot(collection(db, 'orders'), (snap) => {
+          setOrders(snap.docs.map(d => d.data() as Order));
+        });
+
+        // 4. Settings (Single Doc)
+        unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
+          if (snap.exists()) {
+            setSettings(snap.data() as GlobalSettings);
+          } else {
+            // Init settings if missing
+            setDoc(doc(db, 'settings', 'global'), INITIAL_SETTINGS).catch(e => console.error(e));
+          }
+        });
+
+    } catch (err: any) {
+        setConnectionError(`初始化失敗：${err.message}`);
+    }
 
     return () => {
-      unsubProd();
-      unsubCust();
-      unsubOrder();
-      unsubSettings();
+      if(unsubProd) unsubProd();
+      if(unsubCust) unsubCust();
+      if(unsubOrder) unsubOrder();
+      if(unsubSettings) unsubSettings();
     };
   }, []);
 
@@ -179,14 +249,13 @@ function App() {
     }
   };
 
-  // CSV Export (Same as before, reading from state)
+  // CSV Export
   const exportToCSV = () => {
     const activeOrders = orders.filter(o => !o.isArchived);
     if (activeOrders.length === 0) {
       alert("目前沒有進行中的訂單可匯出。");
       return;
     }
-    // ... CSV logic relies on state 'orders', 'customers', 'products' which are now synced
     const headers = [
       "訂單ID", "顧客名稱", "商品名稱", "款式", "數量", 
       "售價(TWD)", "總金額(TWD)", "日幣原價(JPY)", "預估成本(TWD)", "預估毛利(TWD)", "毛利率(%)",
@@ -256,11 +325,7 @@ function App() {
         if (data.products && data.customers && data.orders) {
            if(window.confirm(`【資料搬家】確定要將備份檔上傳到雲端嗎？\n\n這將會新增：\n+ 商品: ${data.products.length} 筆\n+ 顧客: ${data.customers.length} 筆\n+ 訂單: ${data.orders.length} 筆\n\n請耐心等待上傳完成...`)) {
                
-               const batchLimit = 500; // Firestore batch limit
                let opCount = 0;
-               
-               // We will use simple promises for simplicity, or batches if needed. 
-               // For safety and simplicity in this UI, we do distinct writes but warn user to wait.
                
                // 1. Settings
                if(data.settings) await setDoc(doc(db, 'settings', 'global'), data.settings);
@@ -313,6 +378,29 @@ function App() {
       <span className="font-medium">{label}</span>
     </button>
   );
+
+  if (connectionError) {
+      return (
+          <div className="min-h-screen bg-stone-50 flex items-center justify-center p-6">
+              <div className="bg-white max-w-md w-full p-8 rounded-xl shadow-lg border border-red-200 text-center">
+                  <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <AlertTriangle className="text-red-500 w-8 h-8" />
+                  </div>
+                  <h2 className="text-xl font-bold text-stone-800 mb-2">無法連線至雲端</h2>
+                  <p className="text-stone-600 mb-6">{connectionError}</p>
+                  <button 
+                    onClick={() => window.location.reload()} 
+                    className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700"
+                  >
+                    重新整理
+                  </button>
+                  <p className="text-xs text-stone-400 mt-4">
+                      如果您是第一次建立，請確認 Firebase Console 的 Firestore Rules 已設為 `allow read, write: if true;`
+                  </p>
+              </div>
+          </div>
+      );
+  }
 
   return (
     <div className="min-h-screen bg-stone-50 flex flex-col md:flex-row font-sans text-stone-800">
@@ -373,8 +461,6 @@ function App() {
               orders={orders} 
               customers={customers} 
               settings={settings}
-              onExportBackup={exportBackupJSON}
-              onImportBackup={importBackupJSON}
             />
           )}
           {activeTab === 'crm' && (
@@ -448,4 +534,11 @@ function App() {
   );
 }
 
-export default App;
+// Wrap App with ErrorBoundary
+export default function WrappedApp() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
