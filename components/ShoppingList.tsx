@@ -53,19 +53,29 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
     
     item.orders.forEach(order => {
       const needed = order.quantity;
+      let allocated = 0;
+      
       if (remainingBought >= needed) {
-        order.quantityBought = needed;
-        order.status = 'BOUGHT';
+        allocated = needed;
         remainingBought -= needed;
       } else if (remainingBought > 0) {
-        order.quantityBought = remainingBought;
-        order.status = 'PENDING'; // Partially bought
+        allocated = remainingBought;
         remainingBought = 0;
       } else {
-        order.quantityBought = 0;
-        order.status = 'PENDING';
+        allocated = 0;
       }
-      onUpdateOrder(order);
+
+      // Update Order Status
+      let newStatus = order.status;
+      if (allocated === needed) newStatus = 'BOUGHT';
+      else if (allocated > 0) newStatus = 'PENDING'; // Partially bought
+      else newStatus = 'PENDING';
+
+      onUpdateOrder({
+          ...order,
+          quantityBought: allocated,
+          status: newStatus as any
+      });
     });
   };
 
@@ -127,7 +137,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                         </div>
                         <div className="text-sm text-stone-500 mt-1 flex gap-4">
                            <span>總需: <b className="text-stone-800">{item.totalNeeded}</b></span>
-                           <span className={item.totalBought < item.totalNeeded ? "text-pink-500" : "text-green-600"}>
+                           <span className={item.totalBought < item.totalNeeded ? "text-pink-500 font-bold" : "text-green-600 font-bold"}>
                              已買: {item.totalBought}
                            </span>
                         </div>
@@ -148,7 +158,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                         min="0"
                         value={item.totalBought}
                         onChange={(e) => handleUpdateBought(item, Number(e.target.value))}
-                        className="w-16 text-center border border-stone-300 rounded-md py-1 focus:ring-2 focus:ring-blue-500 outline-none font-bold text-lg"
+                        className={`w-16 text-center border rounded-md py-1 focus:ring-2 focus:ring-blue-500 outline-none font-bold text-lg ${item.totalBought < item.totalNeeded ? 'border-pink-300 text-pink-600 bg-pink-50' : 'border-stone-300'}`}
                       />
                       <button onClick={() => setExpandedItem(isExpanded ? null : item.id)} className="text-stone-400">
                          {isExpanded ? <ChevronUp /> : <ChevronDown />}
@@ -164,6 +174,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                         {item.orders.map((order, idx) => {
                           const customer = customers.find(c => c.id === order.customerId);
                           const isFullyAllocated = order.quantityBought >= order.quantity;
+                          const isPartiallyAllocated = order.quantityBought > 0 && !isFullyAllocated;
                           const isNotified = order.notificationStatus === 'NOTIFIED';
                           
                           return (
@@ -178,7 +189,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                                 <div className="flex items-center gap-2">
                                     <span className="text-stone-500">喊 {order.quantity}</span>
                                     <span className="text-stone-300">→</span>
-                                    <span className={`font-bold ${isFullyAllocated ? 'text-green-600' : 'text-pink-500'}`}>
+                                    <span className={`font-bold ${isFullyAllocated ? 'text-green-600' : isPartiallyAllocated ? 'text-amber-500' : 'text-red-400'}`}>
                                     分 {order.quantityBought}
                                     </span>
                                 </div>

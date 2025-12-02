@@ -70,7 +70,7 @@ export const smartParseOrder = async (
   productName: string;
   quantity: number;
   variant?: string;
-} | null> => {
+}[] | null> => {
   try {
     const ai = getGeminiClient();
     
@@ -78,17 +78,28 @@ export const smartParseOrder = async (
     const customerList = customers.map(c => `${c.lineName}/${c.nickname}`).join(', ');
 
     const prompt = `
-      You are a parsing assistant for a "Daigou" (Personal Shopper).
-      Identify the Customer Name, Product Name, Variant (Color/Size), and Quantity from the input.
+      You are a parsing assistant for a "Daigou" (Personal Shopper) analyzing a chat screenshot or text list.
+      
+      Goal: Identify ALL orders in the input.
+      Input context: It might be a screenshot of a LINE chat where users say "+1", "Black +2", etc.
       
       Existing Products: ${productList}
       Existing Customers: ${customerList}
       
       Rules:
-      1. If the product name vaguely matches an existing one, use the existing name.
-      2. If the customer vaguely matches, use the existing name.
-      3. Return JSON ONLY. Format: {"customerName": string, "productName": string, "quantity": number, "variant": string}
-      4. If unknown, leave fields as empty string or 0.
+      1. Return an ARRAY of objects. Each object represents one order line.
+      2. Fields: "customerName", "productName", "quantity" (default 1), "variant" (Color/Size).
+      3. If a line says "Amy +1", customer is "Amy", quantity is 1.
+      4. If a line says "Jason Black +2", customer is "Jason", variant is "Black", quantity is 2.
+      5. Try to match "productName" to Existing Products if possible, otherwise use what's in text.
+      6. Try to match "customerName" to Existing Customers.
+      7. Return JSON ONLY. No markdown formatting.
+      
+      Example Output:
+      [
+        {"customerName": "Amy", "productName": "EVE", "quantity": 1, "variant": ""},
+        {"customerName": "Jason", "productName": "EVE", "quantity": 2, "variant": "Black"}
+      ]
     `;
 
     const parts: any[] = [{ text: prompt }];
@@ -111,7 +122,12 @@ export const smartParseOrder = async (
 
     const text = response.text;
     if (!text) return null;
-    return JSON.parse(text);
+    
+    // Clean up potential markdown code blocks
+    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    const parsed = JSON.parse(cleanText);
+    return Array.isArray(parsed) ? parsed : [parsed];
 
   } catch (error) {
     console.error("Smart Parse Error", error);

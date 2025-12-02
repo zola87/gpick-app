@@ -25,7 +25,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
     // Only process orders that are NOT archived (active session)
     const activeOrders = orders.filter(o => !o.isArchived);
 
-    return customers.map(customer => {
+    const bills = customers.map(customer => {
       // Basic filtering
       if (searchTerm && !customer.lineName.toLowerCase().includes(searchTerm.toLowerCase()) && !customer.nickname?.toLowerCase().includes(searchTerm.toLowerCase())) {
           return null;
@@ -41,8 +41,11 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         const product = products.find(p => p.id === order.productId);
         if (!product) return null;
         
-        const billQty = order.status === 'BOUGHT' || order.status === 'PACKED' || order.status === 'SHIPPED' 
-          ? order.quantityBought || order.quantity 
+        // Use quantity bought if available and status indicates progress, otherwise use quantity
+        // Actually for billing we usually bill what they ordered, or what we bought?
+        // Usually daigou bills what is bought.
+        const billQty = (order.status === 'BOUGHT' || order.status === 'PACKED' || order.status === 'SHIPPED')
+          ? (order.quantityBought || order.quantity) 
           : order.quantity; 
 
         if (billQty === 0) return null;
@@ -92,7 +95,14 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         paymentMethod: paymentInfo?.paymentMethod,
         paymentNote: paymentInfo?.paymentNote
       };
-    }).filter(Boolean);
+    }).filter(Boolean) as any[];
+
+    // Sort: Unpaid first (isFullyPaid=false), then Paid (isFullyPaid=true)
+    return bills.sort((a, b) => {
+        if (a.isFullyPaid === b.isFullyPaid) return 0;
+        return a.isFullyPaid ? 1 : -1;
+    });
+
   }, [customers, orders, products, settings, searchTerm]);
 
   const generateBillText = (bill: NonNullable<typeof customerBills[0]>) => {
@@ -202,7 +212,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
           if (!bill) return null;
           
           return (
-            <div key={bill.customer.id} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col hover:shadow-md transition-shadow ${bill.isFullyPaid ? 'border-green-300 ring-1 ring-green-100' : 'border-stone-200'}`}>
+            <div key={bill.customer.id} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col hover:shadow-md transition-shadow ${bill.isFullyPaid ? 'border-green-300 ring-1 ring-green-100 opacity-80' : 'border-stone-200'}`}>
               <div className="p-4 bg-stone-50 border-b border-stone-100 flex justify-between items-center">
                 <div className="flex items-center gap-2">
                     <div className="font-bold text-lg text-blue-800">{bill.customer.lineName}</div>
