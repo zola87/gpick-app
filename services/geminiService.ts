@@ -74,26 +74,45 @@ export const smartParseOrder = async (
   try {
     const ai = getGeminiClient();
     
-    const productList = products.map(p => `${p.name} (ID: ${p.id})`).join(', ');
-    const customerList = customers.map(c => `${c.lineName}/${c.nickname}`).join(', ');
+    const productList = products.map(p => `${p.name} (Variants: ${p.variants.join(',')})`).join('\n');
+    const customerList = customers.map(c => `${c.lineName}`).join(', ');
 
     const prompt = `
-      You are a parsing assistant for a "Daigou" (Personal Shopper).
-      Identify the Customer Name, Product Name, Variant (Color/Size), and Quantity from the input.
+      You are an AI assistant for a Personal Shopper (Daigou). 
+      Your task is to parse an order from a text input OR a screenshot of a chat (LINE/WhatsApp).
       
-      Existing Products: ${productList}
+      The input might contain:
+      1. A chat log where a customer says what they want.
+      2. A simple text list of orders.
+      
+      Context - Known Data:
+      Existing Products: 
+      ${productList}
+      
       Existing Customers: ${customerList}
       
-      Rules:
-      1. If the product name vaguely matches an existing one, use the existing name.
-      2. If the customer vaguely matches, use the existing name.
-      3. Return JSON ONLY. Format: {"customerName": string, "productName": string, "quantity": number, "variant": string}
-      4. If unknown, leave fields as empty string or 0.
+      Goal: Extract the *single most relevant* order intent.
+      
+      Extract fields:
+      1. **customerName**: The name of the person ordering. 
+         - If from a chat screenshot, it's the sender name (usually at the top or next to the bubble).
+         - If text, look for patterns like "Amy: +1", "Jason +1".
+         - IMPORTANT: If the name is "Amy Chen", keep it as "Amy Chen". Do not split names.
+      2. **productName**: Identify the product. Match loosely with Existing Products.
+      3. **variant**: Look for colors, sizes (e.g., "Red", "Blue", "L", "White").
+      4. **quantity**: Look for "+1", "one", "2 pcs". Default to 1.
+      
+      Output JSON format strictly:
+      {"customerName": string, "productName": string, "quantity": number, "variant": string}
+      
+      Constraints:
+      - Return plain JSON only, no markdown formatting.
+      - If multiple items are found, just return the first one.
     `;
 
     const parts: any[] = [{ text: prompt }];
     
-    if (input.text) parts.push({ text: `User Text: ${input.text}` });
+    if (input.text) parts.push({ text: `User Input Text:\n${input.text}` });
     if (input.imageBase64) {
       parts.push({
         inlineData: {

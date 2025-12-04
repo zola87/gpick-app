@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Product, Order, Customer } from '../types';
-import { CheckCircle, Circle, MapPin, Search, ChevronDown, ChevronUp, Bell, Check } from 'lucide-react';
+import { CheckCircle, Circle, MapPin, Search, ChevronDown, ChevronUp, Bell, Check, ShoppingCart, User, Plus, X } from 'lucide-react';
 
 interface ShoppingListProps {
   products: Product[];
@@ -13,6 +13,11 @@ interface ShoppingListProps {
 export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, customers, onUpdateOrder }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [justFilledOrderIds, setJustFilledOrderIds] = useState<string[]>([]);
+
+  // Batch Add State
+  const [batchModeItem, setBatchModeItem] = useState<{id: string, name: string} | null>(null);
+  const [batchQty, setBatchQty] = useState<string>(''); // string to handle empty input nicely
 
   // Filter archived orders first
   const activeOrders = orders.filter(o => !o.isArchived);
@@ -74,9 +79,61 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
       onUpdateOrder({...order, notificationStatus: newStatus});
   };
 
+  const handleBatchAdd = () => {
+      if(!batchModeItem) return;
+      const qtyToAdd = parseInt(batchQty) || 0;
+      if(qtyToAdd <= 0) {
+          setBatchModeItem(null);
+          return;
+      }
+
+      const item = filteredItems.find(i => i.id === batchModeItem.id);
+      if(item) {
+          // Identify which orders will receive this batch
+          // We simulate distribution starting from current totalBought up to totalBought + qtyToAdd
+          const currentTotal = item.totalBought;
+          const newTotal = currentTotal + qtyToAdd;
+          
+          let allocationStart = currentTotal;
+          let allocationAmount = qtyToAdd;
+          const newlyFilled: string[] = [];
+
+          // Sort orders by timestamp
+          const sortedOrders = [...item.orders].sort((a,b) => a.timestamp - b.timestamp);
+          
+          // Calculate cumulative needs
+          let cumulativeNeed = 0;
+          sortedOrders.forEach(order => {
+              const orderStart = cumulativeNeed;
+              cumulativeNeed += order.quantity;
+              const orderEnd = cumulativeNeed;
+
+              // Check if the "newly added range" overlaps with this order's "needed range"
+              // New Range: [allocationStart, allocationStart + allocationAmount]
+              // Order Range: [orderStart, orderEnd]
+              
+              const overlapStart = Math.max(allocationStart, orderStart);
+              const overlapEnd = Math.min(newTotal, orderEnd);
+              
+              if (overlapEnd > overlapStart) {
+                  newlyFilled.push(order.id);
+              }
+          });
+
+          setJustFilledOrderIds(newlyFilled);
+          handleUpdateBought(item, newTotal);
+          setExpandedItem(item.id);
+          
+          // Auto clear highlight after 5 seconds
+          setTimeout(() => setJustFilledOrderIds([]), 5000);
+      }
+      setBatchModeItem(null);
+      setBatchQty('');
+  };
+
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="bg-blue-600 text-white p-6 rounded-t-xl shadow-md sticky top-0 z-10">
+    <div className="max-w-3xl mx-auto pb-24">
+      <div className="bg-blue-600 text-white p-6 rounded-t-xl shadow-md sticky top-0 z-20">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-2xl font-bold flex items-center gap-2">
             <MapPin className="w-6 h-6 text-pink-300" />
@@ -92,7 +149,14 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
             />
           </div>
         </div>
-        <p className="text-blue-100 text-xs">依喊單順序分配，輸入實際購買數量即可自動分配。點擊鈴鐺標記通知。</p>
+        <div className="flex justify-between items-end">
+             <p className="text-blue-100 text-xs">依喊單順序分配，輸入實際購買數量即可自動分配。</p>
+             <div className="text-xs bg-blue-700 px-2 py-1 rounded">
+                 未完成: <span className="font-bold text-white">{filteredItems.filter(i => !i.isComplete).length}</span> 
+                 <span className="mx-1">/</span>
+                 已完成: <span className="font-bold text-green-300">{filteredItems.filter(i => i.isComplete).length}</span>
+             </div>
+        </div>
       </div>
       
       <div className="bg-white shadow-md rounded-b-xl overflow-hidden min-h-[500px]">
@@ -103,88 +167,109 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
         ) : (
           <div className="divide-y divide-stone-100">
             {filteredItems.map((item) => {
-              const isExpanded = expandedItem === item.id;
+              const isExpanded = expandedItem === item.id || !item.isComplete; 
               
               return (
-                <div key={item.id} className={`transition-all ${item.isComplete ? 'bg-stone-50 opacity-70' : 'bg-white'}`}>
+                <div key={item.id} className={`transition-all ${item.isComplete ? 'bg-stone-50 opacity-70' : 'bg-white border-l-4 border-l-pink-500'}`}>
                   {/* Header Row */}
-                  <div className="p-4 flex items-center justify-between">
-                    <div className="flex items-center gap-4 flex-1" onClick={() => setExpandedItem(isExpanded ? null : item.id)}>
+                  <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4 flex-1 cursor-pointer" onClick={() => setExpandedItem(expandedItem === item.id ? null : item.id)}>
                       <div className={`cursor-pointer ${item.isComplete ? 'text-green-500' : 'text-stone-300 hover:text-blue-400'}`}>
                         {item.isComplete ? <CheckCircle className="w-8 h-8 fill-current" /> : <Circle className="w-8 h-8" />}
                       </div>
                       
-                      <div className="flex-1 cursor-pointer">
-                        <div className="flex items-center gap-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
                           <h3 className={`font-bold text-lg ${item.isComplete ? 'line-through text-stone-500' : 'text-stone-800'}`}>
                             {item.product.name}
                           </h3>
                           {item.variant && (
-                            <span className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full font-medium">
+                            <span className="bg-amber-100 text-amber-800 border-2 border-amber-200 text-sm px-3 py-1 rounded-lg font-bold shadow-sm">
                               {item.variant}
                             </span>
                           )}
                         </div>
-                        <div className="text-sm text-stone-500 mt-1 flex gap-4">
-                           <span>總需: <b className="text-stone-800">{item.totalNeeded}</b></span>
-                           <span className={item.totalBought < item.totalNeeded ? "text-pink-500" : "text-green-600"}>
-                             已買: {item.totalBought}
-                           </span>
+                        <div className="text-sm text-stone-500 mt-1 flex gap-4 items-center">
+                           <span>需求總數: <b className="text-stone-800 text-lg">{item.totalNeeded}</b></span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Quick Action */}
-                    <div className="flex items-center gap-2">
-                      <button 
-                        onClick={() => handleUpdateBought(item, item.totalNeeded)}
-                        className="text-xs bg-stone-100 hover:bg-green-100 text-stone-600 hover:text-green-700 px-2 py-1 rounded border border-stone-200"
-                        title="全部買齊"
-                      >
-                        All
-                      </button>
+                    {/* Quick Action Input */}
+                    <div className="flex items-center gap-2 bg-stone-50 p-2 rounded-lg border border-stone-200">
+                      <span className="text-xs text-stone-500 font-medium">總買到:</span>
                       <input 
                         type="number" 
                         min="0"
                         value={item.totalBought}
+                        onClick={(e) => (e.target as HTMLInputElement).select()}
                         onChange={(e) => handleUpdateBought(item, Number(e.target.value))}
-                        className="w-16 text-center border border-stone-300 rounded-md py-1 focus:ring-2 focus:ring-blue-500 outline-none font-bold text-lg"
+                        className={`w-16 text-center border rounded-md py-1 focus:ring-2 focus:ring-blue-500 outline-none font-bold text-lg ${item.totalBought < item.totalNeeded ? 'text-pink-600 border-pink-200 bg-pink-50' : 'text-green-600 border-green-200 bg-green-50'}`}
                       />
-                      <button onClick={() => setExpandedItem(isExpanded ? null : item.id)} className="text-stone-400">
-                         {isExpanded ? <ChevronUp /> : <ChevronDown />}
+                      
+                      {/* Incremental Add Button */}
+                      {!item.isComplete && (
+                          <button 
+                            onClick={() => setBatchModeItem({id: item.id, name: `${item.product.name} ${item.variant || ''}`})}
+                            className="bg-blue-600 text-white w-8 h-8 rounded flex items-center justify-center hover:bg-blue-700 active:scale-95 transition-all shadow-sm"
+                            title="追加剛買到的數量"
+                          >
+                              <Plus size={18} />
+                          </button>
+                      )}
+
+                      <button 
+                        onClick={() => handleUpdateBought(item, item.totalNeeded)}
+                        className="text-xs bg-white hover:bg-green-50 text-stone-500 hover:text-green-600 px-2 py-1.5 rounded border border-stone-200 shadow-sm transition-colors"
+                        title="設為全部買齊"
+                      >
+                        All
                       </button>
                     </div>
                   </div>
 
                   {/* Expanded Detail (Priority List) */}
                   {isExpanded && (
-                    <div className="bg-stone-50 px-4 pb-4 pt-2 border-t border-stone-100 ml-12 border-l-2 border-blue-200">
-                      <h4 className="text-xs font-bold text-stone-500 mb-2 uppercase tracking-wider">分配順序 (依喊單時間)</h4>
-                      <div className="space-y-1">
+                    <div className="bg-stone-50 px-4 pb-4 pt-2 border-t border-stone-100 ml-0 sm:ml-12">
+                      <h4 className="text-xs font-bold text-stone-400 mb-2 uppercase tracking-wider flex items-center gap-1">
+                         <ShoppingCart size={12}/> 分配順序 (依喊單時間)
+                      </h4>
+                      <div className="space-y-2">
                         {item.orders.map((order, idx) => {
                           const customer = customers.find(c => c.id === order.customerId);
                           const isFullyAllocated = order.quantityBought >= order.quantity;
                           const isNotified = order.notificationStatus === 'NOTIFIED';
+                          const isJustFilled = justFilledOrderIds.includes(order.id);
                           
                           return (
-                            <div key={order.id} className="flex justify-between items-center text-sm py-2 border-b border-stone-200 last:border-0 hover:bg-white rounded px-2 transition-colors">
+                            <div 
+                                key={order.id} 
+                                className={`flex justify-between items-center text-sm py-2 px-3 rounded-lg border transition-all duration-500
+                                    ${isJustFilled ? 'bg-yellow-100 border-yellow-300 ring-2 ring-yellow-200 scale-[1.02]' : 
+                                      isFullyAllocated ? 'bg-green-50 border-green-100' : 'bg-white border-stone-200 shadow-sm'
+                                    }`}
+                            >
                               <div className="flex items-center gap-3">
-                                <span className="text-stone-400 w-4 text-xs">#{idx + 1}</span>
-                                <span className={isFullyAllocated ? 'text-stone-700 font-medium' : 'text-stone-400'}>
-                                  {customer?.lineName || 'Unknown'}
-                                </span>
+                                <span className="text-stone-300 w-4 text-xs font-mono">#{idx + 1}</span>
+                                <div className="flex items-center gap-2">
+                                    <User size={14} className="text-stone-400"/>
+                                    <span className={`font-bold ${isFullyAllocated ? 'text-green-800' : 'text-stone-700'}`}>
+                                    {customer?.lineName || 'Unknown'}
+                                    </span>
+                                    {isJustFilled && <span className="text-[10px] bg-yellow-400 text-yellow-900 px-1.5 rounded font-bold animate-pulse">剛剛買到!</span>}
+                                </div>
                               </div>
                               <div className="flex items-center gap-4">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-stone-500">喊 {order.quantity}</span>
+                                <div className="flex items-center gap-2 text-xs">
+                                    <span className="text-stone-400">喊 {order.quantity}</span>
                                     <span className="text-stone-300">→</span>
-                                    <span className={`font-bold ${isFullyAllocated ? 'text-green-600' : 'text-pink-500'}`}>
-                                    分 {order.quantityBought}
+                                    <span className={`font-bold text-base ${isFullyAllocated ? 'text-green-600' : 'text-pink-500'}`}>
+                                      獲 {order.quantityBought}
                                     </span>
                                 </div>
                                 <button 
                                     onClick={() => toggleNotification(order)}
-                                    className={`p-1 rounded-full transition-colors ${isNotified ? 'bg-green-100 text-green-600' : 'bg-stone-200 text-stone-400 hover:bg-stone-300'}`}
+                                    className={`p-1.5 rounded-full transition-colors ${isNotified ? 'bg-green-200 text-green-700' : 'bg-stone-100 text-stone-400 hover:bg-stone-200'}`}
                                     title={isNotified ? "已通知" : "未通知"}
                                 >
                                     {isNotified ? <Check size={14} /> : <Bell size={14} />}
@@ -202,6 +287,34 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
           </div>
         )}
       </div>
+
+      {/* Batch Add Modal */}
+      {batchModeItem && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+             <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 animate-in zoom-in-95">
+                 <h3 className="text-lg font-bold text-stone-800 mb-2">本次買到數量</h3>
+                 <p className="text-sm text-stone-500 mb-4">{batchModeItem.name}</p>
+                 
+                 <div className="flex gap-2">
+                    <input 
+                       type="number" 
+                       className="flex-1 border-2 border-blue-500 rounded-lg text-2xl font-bold text-center py-2 focus:outline-none"
+                       autoFocus
+                       placeholder="0"
+                       value={batchQty}
+                       onChange={e => setBatchQty(e.target.value)}
+                       onKeyDown={e => e.key === 'Enter' && handleBatchAdd()}
+                    />
+                 </div>
+                 <p className="text-xs text-stone-400 mt-2 text-center">輸入這次剛剛拿到的數量，系統會自動分配</p>
+                 
+                 <div className="grid grid-cols-2 gap-3 mt-6">
+                    <button onClick={() => {setBatchModeItem(null); setBatchQty('');}} className="py-3 bg-stone-100 text-stone-600 font-bold rounded-lg">取消</button>
+                    <button onClick={handleBatchAdd} className="py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg shadow-blue-200">確認分配</button>
+                 </div>
+             </div>
+          </div>
+      )}
     </div>
   );
 };

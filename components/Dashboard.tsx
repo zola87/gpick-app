@@ -2,18 +2,16 @@
 import React, { useState } from 'react';
 import { Product, Order, Customer, GlobalSettings } from '../types';
 import { analyzeSalesData } from '../services/geminiService';
-import { TrendingUp, Users, ShoppingCart, JapaneseYen, Sparkles, Loader, PieChart, Download, Upload, Share2 } from 'lucide-react';
+import { TrendingUp, Users, ShoppingCart, JapaneseYen, Sparkles, Loader, PieChart } from 'lucide-react';
 
 interface DashboardProps {
   products: Product[];
   orders: Order[];
   customers: Customer[];
   settings: GlobalSettings;
-  onExportBackup?: () => void;
-  onImportBackup?: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customers, settings, onExportBackup, onImportBackup }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customers, settings }) => {
   const [aiAnalysis, setAiAnalysis] = useState<string>('');
   const [loadingAi, setLoadingAi] = useState(false);
 
@@ -59,36 +57,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
 
   return (
     <div className="space-y-8">
-      
-      {/* --- Data Sync Center (New) --- */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg p-6 text-white">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-              <div>
-                  <h2 className="text-xl font-bold flex items-center gap-2">
-                      <Share2 className="text-blue-200"/> 資料同步中心
-                  </h2>
-                  <p className="text-blue-100 text-sm mt-1 opacity-90">
-                      交接班或同步資料時使用。完全免費，不需連線資料庫。
-                  </p>
-              </div>
-              <div className="flex gap-4 w-full md:w-auto">
-                  <button 
-                    onClick={onExportBackup}
-                    className="flex-1 md:flex-none bg-white/20 hover:bg-white/30 border border-white/30 backdrop-blur-sm py-3 px-6 rounded-lg font-bold flex flex-col items-center justify-center gap-1 transition-all"
-                  >
-                      <Download size={20} className="text-blue-200" />
-                      <span className="text-xs">傳送資料 (匯出)</span>
-                  </button>
-                  <label className="flex-1 md:flex-none bg-white text-blue-600 hover:bg-blue-50 py-3 px-6 rounded-lg font-bold flex flex-col items-center justify-center gap-1 cursor-pointer shadow-md transition-all">
-                      <Upload size={20} />
-                      <span className="text-xs">接收資料 (匯入)</span>
-                      <input type="file" accept=".json" onChange={onImportBackup} className="hidden" />
-                  </label>
-              </div>
-          </div>
-      </div>
-
-      <div className="flex justify-between items-center mt-4">
+      <div className="flex justify-between items-center">
          <h2 className="text-2xl font-bold text-stone-800">本場連線營運概況</h2>
          <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-medium">進行中訂單</span>
       </div>

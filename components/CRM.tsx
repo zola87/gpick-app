@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Customer, Order, Product } from '../types';
-import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle, Trash2 } from 'lucide-react';
+import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle, ExternalLink, Trash2 } from 'lucide-react';
 
 interface CRMProps {
   customers: Customer[];
@@ -18,9 +18,11 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
   const [editForm, setEditForm] = useState<Partial<Customer>>({});
 
   const filteredCustomers = customers.filter(c => 
-    c.lineName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    c.nickname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.realName?.toLowerCase().includes(searchTerm.toLowerCase())
+    !c.isStock && ( // Exclude stock from CRM list
+        c.lineName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        c.nickname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.realName?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
   );
 
   const analyzeCustomer = (customerId: string) => {
@@ -62,6 +64,18 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
       onUpdateCustomer(editForm as Customer);
       setEditingId(null);
     }
+  };
+
+  const handleDelete = (e: React.MouseEvent, id: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if(window.confirm('確定要刪除這位顧客嗎？\n\n注意：這將會刪除該顧客的所有「訂單紀錄」與「採購需求」！\n此操作無法復原。')) {
+          if (onDeleteCustomer) {
+             onDeleteCustomer(id);
+          } else {
+             console.error("Delete function not available");
+          }
+      }
   };
 
   const toggleExpand = (id: string) => {
@@ -116,7 +130,11 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
                   </div>
                 </div>
                 <div className="flex gap-2 items-center">
-                  <span className="text-xs bg-stone-200 text-stone-600 px-2 py-1 rounded-full">{stats.count} 單</span>
+                  {customer.chatUrl && (
+                      <a href={customer.chatUrl} target="_blank" rel="noreferrer" className="text-xs bg-[#06C755] text-white px-2 py-1 rounded-full flex items-center gap-1 hover:bg-[#05b34c]">
+                          <MessageCircle size={12}/> Chat
+                      </a>
+                  )}
                   <button onClick={() => toggleExpand(customer.id)} className="text-stone-400 hover:text-stone-600">
                       {isExpanded ? <ChevronUp size={20}/> : <ChevronDown size={20}/>}
                   </button>
@@ -129,43 +147,41 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
                     <div className="flex justify-end gap-2 mb-2">
                         {isEditing ? (
                             <>
+                            <button 
+                                type="button"
+                                onClick={(e) => handleDelete(e, customer.id)} 
+                                className="p-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 border border-red-200" 
+                                title="刪除顧客"
+                            >
+                                <Trash2 size={16} />
+                            </button>
                             <button onClick={saveEdit} className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200"><Save size={16} /></button>
                             <button onClick={() => setEditingId(null)} className="p-1.5 bg-stone-100 text-stone-600 rounded-lg hover:bg-stone-200"><X size={16} /></button>
                             </>
                         ) : (
-                            <div className="flex gap-2">
-                                <button onClick={() => startEdit(customer)} className="flex items-center gap-1 px-2 py-1 bg-white border border-stone-200 text-stone-500 rounded text-xs hover:text-blue-600 hover:border-blue-200">
-                                    <Edit2 size={12} /> 編輯
-                                </button>
-                                {onDeleteCustomer && !customer.isStock && (
-                                    <button onClick={() => onDeleteCustomer(customer.id)} className="flex items-center gap-1 px-2 py-1 bg-white border border-red-200 text-red-400 rounded text-xs hover:bg-red-50 hover:text-red-600">
-                                        <Trash2 size={12} /> 刪除
-                                    </button>
-                                )}
-                            </div>
+                            <button onClick={() => startEdit(customer)} className="flex items-center gap-1 px-2 py-1 bg-white border border-stone-200 text-stone-500 rounded text-xs hover:text-blue-600 hover:border-blue-200">
+                                <Edit2 size={12} /> 編輯資料
+                            </button>
                         )}
                     </div>
-
-                    {/* LINE Chat Link Field */}
+                    
+                    {/* Chat Link Field */}
                     <div className="flex items-center gap-2 text-stone-600">
-                      <MessageCircle size={14} className="text-[#06C755]" />
-                      <span className="w-16 text-stone-400">聊天連結:</span>
-                      {isEditing ? (
-                          <input 
-                            className="flex-1 border rounded px-1 text-xs" 
-                            placeholder="https://manager.line.biz/..."
-                            value={editForm.lineChatUrl || ''} 
-                            onChange={e => setEditForm({...editForm, lineChatUrl: e.target.value})} 
-                          />
-                      ) : (
-                          customer.lineChatUrl ? (
-                            <a href={customer.lineChatUrl} target="_blank" rel="noreferrer" className="flex-1 text-blue-500 underline truncate">
-                                開啟後台對話
-                            </a>
-                          ) : (
-                            <span className="text-stone-300 italic">未設定</span>
-                          )
-                      )}
+                    <MessageCircle size={14} className="text-stone-400" />
+                    <span className="w-16 text-stone-400">LINE連結:</span>
+                    {isEditing ? (
+                        <input 
+                          className="flex-1 border rounded px-1 text-xs" 
+                          placeholder="https://..." 
+                          value={editForm.chatUrl || ''} 
+                          onChange={e => setEditForm({...editForm, chatUrl: e.target.value})} 
+                        />
+                    ) : (
+                        customer.chatUrl ? 
+                        <a href={customer.chatUrl} target="_blank" className="text-blue-500 flex items-center gap-1 hover:underline truncate w-32">
+                            連結 <ExternalLink size={10}/>
+                        </a> : <span className="text-stone-300">-</span>
+                    )}
                     </div>
 
                     <div className="flex items-center gap-2 text-stone-600">

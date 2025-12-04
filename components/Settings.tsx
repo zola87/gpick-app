@@ -1,17 +1,15 @@
 import React, { useState } from 'react';
 import { GlobalSettings } from '../types';
-import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare, Database, Upload } from 'lucide-react';
+import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare } from 'lucide-react';
 
 interface SettingsProps {
   settings: GlobalSettings;
   onSave: (s: GlobalSettings) => void;
   onArchive?: () => void;
   onExport?: () => void;
-  onExportBackup?: () => void;
-  onImportBackup?: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
-const CollapsibleSection = ({ title, icon: Icon, children, defaultOpen = false }: { title: string, icon: any, children: React.ReactNode, defaultOpen?: boolean }) => {
+const CollapsibleSection = ({ title, icon: Icon, children, defaultOpen = false }: { title: string, icon: any, children?: React.ReactNode, defaultOpen?: boolean }) => {
     const [isOpen, setIsOpen] = useState(defaultOpen);
     return (
         <div className="border border-stone-200 rounded-lg overflow-hidden bg-white">
@@ -34,7 +32,7 @@ const CollapsibleSection = ({ title, icon: Icon, children, defaultOpen = false }
     );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive, onExport, onExportBackup, onImportBackup }) => {
+export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive, onExport }) => {
   const [localSettings, setLocalSettings] = React.useState<GlobalSettings>(settings);
   const [newCategory, setNewCategory] = useState('');
 
@@ -225,48 +223,6 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
              </div>
         </CollapsibleSection>
 
-        {/* Backup & Restore (New Section) */}
-        <CollapsibleSection title="資料備份與移轉 (同步)" icon={Database}>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-stone-50 p-4 rounded-lg border border-stone-200 hover:border-blue-300 transition-colors">
-                      <h4 className="font-bold text-stone-700 mb-2 flex items-center gap-2">
-                          <Download size={16} className="text-blue-500"/>
-                          備份資料 (匯出)
-                      </h4>
-                      <p className="text-xs text-stone-500 mb-3 leading-relaxed">
-                        下載目前的商品、顧客、訂單資料為 JSON 檔。<br/>
-                        可用於<strong>傳送給夥伴同步</strong>，或換手機時轉移。
-                      </p>
-                      <button 
-                         onClick={onExportBackup}
-                         className="w-full bg-white border border-blue-200 text-blue-600 font-bold py-2 rounded-lg text-sm hover:bg-blue-50 transition-colors"
-                      >
-                         下載備份檔 (JSON)
-                      </button>
-                  </div>
-
-                  <div className="bg-stone-50 p-4 rounded-lg border border-stone-200 hover:border-red-300 transition-colors">
-                      <h4 className="font-bold text-stone-700 mb-2 flex items-center gap-2">
-                           <Upload size={16} className="text-red-500"/>
-                           還原資料 (匯入)
-                      </h4>
-                       <p className="text-xs text-stone-500 mb-3 leading-relaxed">
-                        讀取備份檔並覆蓋目前手機上的資料。<br/>
-                        <span className="text-red-500 font-bold mt-1 inline-block">注意：目前的資料將被覆蓋！</span>
-                      </p>
-                      <label className="w-full bg-white border border-stone-300 text-stone-600 font-bold py-2 rounded-lg text-sm hover:bg-stone-100 transition-colors cursor-pointer text-center block">
-                         選擇備份檔匯入
-                         <input 
-                            type="file" 
-                            accept=".json" 
-                            onChange={onImportBackup} 
-                            className="hidden" 
-                         />
-                      </label>
-                  </div>
-             </div>
-        </CollapsibleSection>
-
       </div>
 
       {/* Session Management Section */}
@@ -288,7 +244,7 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
                    onClick={onExport}
                    className="w-full bg-white text-blue-600 border border-blue-200 hover:bg-blue-100 font-bold py-2 rounded-lg text-sm"
                 >
-                    下載報表 (Excel/CSV)
+                    下載報表
                 </button>
             </div>
 
@@ -308,7 +264,7 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
                     }}
                     className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 rounded-lg text-sm transition-colors"
                 >
-                    封存舊訂單 (開始新連線)
+                    封存舊訂單
                 </button>
             </div>
         </div>

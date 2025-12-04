@@ -38,7 +38,7 @@ export interface Customer {
   totalSpent?: number;
   lastFiveDigits?: string; // Bank account
   isStock?: boolean; // New: Identifies the virtual inventory holder
-  lineChatUrl?: string; // New: Direct link to LINE OA Chat
+  chatUrl?: string; // New: Direct link to LINE chat
 }
 
 export interface Order {

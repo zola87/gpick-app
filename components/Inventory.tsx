@@ -1,13 +1,14 @@
 
 import React, { useState, useMemo } from 'react';
 import { Customer, Order, Product } from '../types';
-import { Package, User, Box, ArrowRight, CheckSquare, Square, Trash2, Search, X, Plus } from 'lucide-react';
+import { Package, User, Box, ArrowRight, CheckSquare, Square, Trash2, Search, X, Plus, Edit2, Check, XCircle } from 'lucide-react';
 
 interface InventoryProps {
   customers: Customer[];
   orders: Order[];
   products: Product[];
   onUpdateOrder: (o: Order) => void;
+  onBulkUpdateOrders?: (orders: Order[]) => void;
   onAddOrder?: (o: Order, c?: Customer) => void;
   onDeleteOrder?: (id: string) => void;
 }
@@ -15,7 +16,7 @@ interface InventoryProps {
 // Helper
 const generateId = () => Math.random().toString(36).substring(2, 10);
 
-export const Inventory: React.FC<InventoryProps> = ({ customers, orders, products, onUpdateOrder, onAddOrder, onDeleteOrder }) => {
+export const Inventory: React.FC<InventoryProps> = ({ customers, orders, products, onUpdateOrder, onBulkUpdateOrders, onAddOrder, onDeleteOrder }) => {
   const [activeTab, setActiveTab] = useState<'packing' | 'totals' | 'stock'>('packing');
   const [searchTerm, setSearchTerm] = useState('');
   const [totalsSearchTerm, setTotalsSearchTerm] = useState('');
@@ -29,7 +30,11 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
   const [stockQty, setStockQty] = useState(1);
   const [stockVariant, setStockVariant] = useState('');
 
-  // Find the Stock Customer ID
+  // Order Editing State
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [editOrderForm, setEditOrderForm] = useState<{variant: string, quantity: number}>({variant: '', quantity: 1});
+
+  // Find the Stock Customer ID (Used for display filtering)
   const stockCustomer = customers.find(c => c.isStock);
   const stockCustomerId = stockCustomer?.id;
 
@@ -96,21 +101,50 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
   };
 
   const handleAbandonOrder = (order: Order) => {
-     if (!stockCustomerId) {
-         alert("系統錯誤：找不到預設庫存帳號");
+     const stockCust = customers.find(c => c.isStock);
+     if (!stockCust) {
+         alert("系統錯誤：找不到預設庫存帳號 (Stock)");
          return;
      }
      if (window.confirm("確定棄單？此商品將移入「現貨/庫存區」。")) {
-         onUpdateOrder({ ...order, customerId: stockCustomerId, status: 'BOUGHT', notificationStatus: 'UNNOTIFIED' });
+         onUpdateOrder({ 
+             ...order, 
+             customerId: stockCust.id, 
+             status: 'BOUGHT', 
+             notificationStatus: 'UNNOTIFIED',
+             isPaid: false 
+         });
+         // Added feedback here just in case single abandon is used
+         // alert('已移入現貨區'); 
      }
   };
 
   const handleBulkAbandon = (ordersToAbandon: Order[]) => {
-      if (!stockCustomerId) return;
+      // Find stock customer ID dynamically to ensure it's fresh
+      const stockCust = customers.find(c => c.isStock);
+      if (!stockCust) {
+          alert("錯誤：找不到庫存專用帳號，無法棄單。請重整頁面。");
+          return;
+      }
+      
       if (window.confirm(`確定將這位客人的 ${ordersToAbandon.length} 件商品全部棄單轉入庫存？`)) {
-          ordersToAbandon.forEach(o => {
-              onUpdateOrder({ ...o, customerId: stockCustomerId, status: 'BOUGHT', notificationStatus: 'UNNOTIFIED' });
-          });
+          const updates = ordersToAbandon.map(o => ({
+              ...o, 
+              customerId: stockCust.id, 
+              status: 'BOUGHT', 
+              notificationStatus: 'UNNOTIFIED',
+              isPaid: false
+          } as Order));
+
+          if (onBulkUpdateOrders) {
+              onBulkUpdateOrders(updates);
+          } else {
+              // Fallback
+              updates.forEach(o => onUpdateOrder(o));
+          }
+          
+          // CRITICAL FEEDBACK
+          alert(`已成功將 ${updates.length} 件商品移入「現貨/庫存」分頁！`);
       }
   };
 
@@ -150,9 +184,26 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
   };
 
   const handleDeleteStockItem = (orderId: string) => {
-      if (onDeleteOrder && window.confirm("確定要刪除此筆現貨嗎？")) {
-          onDeleteOrder(orderId);
+      if(window.confirm('確定要刪除這筆現貨嗎？此操作無法復原。')) {
+          onDeleteOrder && onDeleteOrder(orderId);
       }
+  };
+
+  const startEditing = (order: Order) => {
+      setEditingOrderId(order.id);
+      setEditOrderForm({
+          variant: order.variant || '',
+          quantity: order.quantity
+      });
+  };
+
+  const saveEditing = (order: Order) => {
+      onUpdateOrder({
+          ...order,
+          variant: editOrderForm.variant,
+          quantity: Number(editOrderForm.quantity)
+      });
+      setEditingOrderId(null);
   };
 
   // Filter customers for reassignment dropdown
@@ -217,6 +268,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                             </div>
                             <div className="flex items-center gap-2">
                                 <button 
+                                    type="button"
                                     onClick={() => handleBulkAbandon(pkg!.orders)}
                                     className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded border border-red-200 hover:bg-red-200"
                                     title="全部移入庫存"
@@ -230,29 +282,68 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                             {pkg!.orders.map(order => {
                                 const prod = products.find(p => p.id === order.productId);
                                 const isPacked = order.status === 'PACKED' || order.status === 'SHIPPED';
+                                const isEditing = editingOrderId === order.id;
+
                                 return (
-                                    <div key={order.id} className="flex items-center justify-between p-2 hover:bg-stone-50 rounded group">
-                                        <div className="flex items-center gap-3 overflow-hidden">
-                                            <button onClick={() => handleTogglePacked(order)} className={`flex-shrink-0 ${isPacked ? 'text-green-500' : 'text-stone-300 hover:text-blue-500'}`}>
-                                                {isPacked ? <CheckSquare size={20} /> : <Square size={20} />}
-                                            </button>
-                                            <div className="min-w-0">
-                                                <p className={`text-sm font-medium truncate ${isPacked ? 'text-stone-400 line-through' : 'text-stone-700'}`}>
-                                                    {prod?.name}
-                                                </p>
-                                                <p className="text-xs text-stone-500">
-                                                    {order.variant && <span className="bg-stone-100 px-1 rounded mr-1">{order.variant}</span>}
-                                                    x {order.quantity}
-                                                </p>
-                                            </div>
+                                    <div key={order.id} className="flex flex-col p-2 hover:bg-stone-50 rounded group border-b border-stone-50 last:border-0">
+                                        <div className="flex items-center justify-between w-full">
+                                            {isEditing ? (
+                                                <div className="flex-1 flex gap-2 items-center">
+                                                    <select 
+                                                        className="border rounded text-sm py-1 px-1 bg-white max-w-[80px]"
+                                                        value={editOrderForm.variant}
+                                                        onChange={e => setEditOrderForm({...editOrderForm, variant: e.target.value})}
+                                                    >
+                                                        <option value="">無</option>
+                                                        {prod?.variants.map(v => <option key={v} value={v}>{v}</option>)}
+                                                    </select>
+                                                    <input 
+                                                        type="number" min="1"
+                                                        className="border rounded text-sm py-1 px-1 w-16"
+                                                        value={editOrderForm.quantity}
+                                                        onChange={e => setEditOrderForm({...editOrderForm, quantity: Number(e.target.value)})}
+                                                    />
+                                                    <button type="button" onClick={() => saveEditing(order)} className="text-green-600 hover:bg-green-100 p-1 rounded"><Check size={16}/></button>
+                                                    <button type="button" onClick={() => setEditingOrderId(null)} className="text-stone-400 hover:bg-stone-100 p-1 rounded"><XCircle size={16}/></button>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-3 overflow-hidden flex-1">
+                                                    <button type="button" onClick={() => handleTogglePacked(order)} className={`flex-shrink-0 ${isPacked ? 'text-green-500' : 'text-stone-300 hover:text-blue-500'}`}>
+                                                        {isPacked ? <CheckSquare size={20} /> : <Square size={20} />}
+                                                    </button>
+                                                    <div className="min-w-0">
+                                                        <p className={`text-sm font-medium truncate ${isPacked ? 'text-stone-400 line-through' : 'text-stone-700'}`}>
+                                                            {prod?.name}
+                                                        </p>
+                                                        <p className="text-xs text-stone-500">
+                                                            {order.variant && <span className="bg-stone-100 px-1 rounded mr-1 font-bold text-stone-600">{order.variant}</span>}
+                                                            x {order.quantity}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            )}
+                                            
+                                            {!isEditing && (
+                                                <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => startEditing(order)}
+                                                        className="text-stone-300 hover:text-blue-500 p-1 mr-1"
+                                                        title="編輯"
+                                                    >
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => handleAbandonOrder(order)}
+                                                        className="text-stone-300 hover:text-red-500 p-1"
+                                                        title="棄單 (移至現貨)"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
-                                        <button 
-                                            onClick={() => handleAbandonOrder(order)}
-                                            className="text-stone-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
-                                            title="棄單 (移至現貨)"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
                                     </div>
                                 );
                             })}
@@ -349,7 +440,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                            value={stockQty}
                            onChange={e => setStockQty(Number(e.target.value))}
                         />
-                        <button onClick={handleAddStock} className="bg-amber-500 text-white px-3 py-1 rounded text-sm hover:bg-amber-600">新增</button>
+                        <button type="button" onClick={handleAddStock} className="bg-amber-500 text-white px-3 py-1 rounded text-sm hover:bg-amber-600">新增</button>
                     </div>
                 </div>
             </div>
@@ -362,7 +453,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                         {stockItems.map(order => {
                             const prod = products.find(p => p.id === order.productId);
                             return (
-                                <div key={order.id} className="p-4 flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div key={order.id} className="p-4 flex flex-col md:flex-row justify-between items-center gap-4 group">
                                     <div className="flex items-center gap-4">
                                         <div className="w-12 h-12 bg-stone-100 rounded-lg flex items-center justify-center">
                                             <Box className="text-stone-400" />
@@ -378,17 +469,19 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                                     
                                     <div className="flex items-center gap-2">
                                         <button 
+                                            type="button"
                                             onClick={() => setReassigningOrder(order)}
                                             className="bg-white border border-stone-200 text-stone-600 px-4 py-2 rounded-lg hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors flex items-center gap-2 text-sm font-medium shadow-sm"
                                         >
                                             分配給客人 <ArrowRight size={16} />
                                         </button>
                                         <button 
+                                            type="button"
                                             onClick={() => handleDeleteStockItem(order.id)}
-                                            className="bg-white border border-red-200 text-red-400 p-2 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
-                                            title="刪除庫存"
+                                            className="p-2 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                            title="刪除"
                                         >
-                                            <Trash2 size={16} />
+                                            <Trash2 size={18} />
                                         </button>
                                     </div>
                                 </div>

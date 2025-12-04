@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Customer, Order, Product, GlobalSettings } from '../types';
-import { Copy, Check, DollarSign, Edit, X, Search, CheckCircle, CreditCard, AlertTriangle, MessageCircle } from 'lucide-react';
+import { Copy, Check, DollarSign, Edit, X, Search, CheckCircle, CreditCard, AlertTriangle, Send } from 'lucide-react';
 
 interface BillingProps {
   customers: Customer[];
@@ -9,6 +9,28 @@ interface BillingProps {
   products: Product[];
   settings: GlobalSettings;
   onUpdateOrder: (o: Order) => void;
+}
+
+interface BillItem {
+  name: string;
+  variant?: string;
+  qty: number;
+  price: number;
+  total: number;
+}
+
+interface Bill {
+  customer: Customer;
+  orders: Order[];
+  items: BillItem[];
+  subtotal: number;
+  shippingFee: number;
+  isFreeShipping: boolean;
+  pickupPayment: number;
+  remittanceAmount: number;
+  isFullyPaid: boolean;
+  paymentMethod?: string;
+  paymentNote?: string;
 }
 
 export const Billing: React.FC<BillingProps> = ({ customers, orders, products, settings, onUpdateOrder }) => {
@@ -25,7 +47,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
     // Only process orders that are NOT archived (active session)
     const activeOrders = orders.filter(o => !o.isArchived);
 
-    return customers.map(customer => {
+    const bills = customers.map((customer): Bill | null => {
       // Basic filtering
       if (searchTerm && !customer.lineName.toLowerCase().includes(searchTerm.toLowerCase()) && !customer.nickname?.toLowerCase().includes(searchTerm.toLowerCase())) {
           return null;
@@ -41,6 +63,12 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         const product = products.find(p => p.id === order.productId);
         if (!product) return null;
         
+        // Billing usually based on what is BOUGHT/PACKED, or just shouted?
+        // Usually billing is for what is secured. 
+        // For simplicity in this tool, if status is PENDING but quantityBought > 0, we bill quantityBought.
+        // If simply shouted (quantity), we might bill for all if pre-order. 
+        // Let's assume we bill for "quantity" unless it's strictly stock limited.
+        // But the previous logic was:
         const billQty = order.status === 'BOUGHT' || order.status === 'PACKED' || order.status === 'SHIPPED' 
           ? order.quantityBought || order.quantity 
           : order.quantity; 
@@ -58,7 +86,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
           price: product.priceTWD,
           total: itemTotal
         };
-      }).filter(Boolean) as { name: string; variant?: string; qty: number; price: number; total: number }[];
+      }).filter(Boolean) as BillItem[];
 
       if (itemsDetail.length === 0) return null;
 
@@ -92,10 +120,17 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         paymentMethod: paymentInfo?.paymentMethod,
         paymentNote: paymentInfo?.paymentNote
       };
-    }).filter(Boolean);
+    });
+
+    // SORT: Unpaid first, Fully Paid last
+    return bills.filter((b): b is Bill => b !== null).sort((a, b) => {
+        if (a.isFullyPaid === b.isFullyPaid) return 0;
+        return a.isFullyPaid ? 1 : -1;
+    });
+
   }, [customers, orders, products, settings, searchTerm]);
 
-  const generateBillText = (bill: NonNullable<typeof customerBills[0]>) => {
+  const generateBillText = (bill: Bill) => {
     const date = new Date().toLocaleDateString('zh-TW');
     const itemsText = bill.items.map(i => `- ${i.name} ${i.variant ? `(${i.variant})` : ''} x${i.qty} $${i.total}`).join('\n');
     
@@ -116,7 +151,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
     return message.trim();
   };
 
-  const openEditModal = (bill: any) => {
+  const openEditModal = (bill: Bill) => {
     setEditingBill({
         customerId: bill.customer.id,
         text: generateBillText(bill)
@@ -132,12 +167,12 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
     }
   };
 
-  const handleOpenChat = (customer: Customer) => {
-      if (customer.lineChatUrl) {
-          window.open(customer.lineChatUrl, '_blank');
-      } else {
-          alert('請先至顧客管理(CRM)設定此客人的 LINE OA 聊天連結。');
-      }
+  const handleShareToLine = () => {
+    if (editingBill) {
+        // Encode text for LINE URL Scheme
+        const url = `https://line.me/R/msg/text/?${encodeURIComponent(editingBill.text)}`;
+        window.open(url, '_blank');
+    }
   };
 
   const handleRegisterPayment = () => {
@@ -159,7 +194,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
     setPayLast5('');
   };
 
-  const handleAbandonBill = (bill: any) => {
+  const handleAbandonBill = (bill: Bill) => {
     const stockCustomer = customers.find(c => c.isStock);
     if(!stockCustomer) return;
 
@@ -182,7 +217,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         <div>
             <h2 className="text-2xl font-bold text-stone-800">對帳與結單</h2>
             <div className="text-sm text-stone-500 mt-1">
-            免運門檻: ${settings.freeShippingThreshold} | 匯款 = 總額 - 取付額(含運)
+            排序: 未付款優先 | 免運門檻: ${settings.freeShippingThreshold}
             </div>
         </div>
         <div className="relative w-full md:w-64">
@@ -202,7 +237,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
           if (!bill) return null;
           
           return (
-            <div key={bill.customer.id} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col hover:shadow-md transition-shadow ${bill.isFullyPaid ? 'border-green-300 ring-1 ring-green-100' : 'border-stone-200'}`}>
+            <div key={bill.customer.id} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col hover:shadow-md transition-shadow ${bill.isFullyPaid ? 'border-green-300 ring-1 ring-green-100 opacity-80 order-last' : 'border-stone-200'}`}>
               <div className="p-4 bg-stone-50 border-b border-stone-100 flex justify-between items-center">
                 <div className="flex items-center gap-2">
                     <div className="font-bold text-lg text-blue-800">{bill.customer.lineName}</div>
@@ -233,8 +268,8 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
                     <span>賣貨便支付 (含運)</span>
                     <span>- ${bill.pickupPayment + bill.shippingFee}</span>
                   </div>
-                  <div className="flex justify-between font-bold text-lg text-blue-600 mt-2 bg-blue-50 p-2 rounded">
-                    <span>需匯款</span>
+                  <div className={`flex justify-between font-bold text-lg mt-2 p-2 rounded ${bill.isFullyPaid ? 'text-green-600 bg-green-50' : 'text-blue-600 bg-blue-50'}`}>
+                    <span>{bill.isFullyPaid ? '已匯款' : '需匯款'}</span>
                     <span>${bill.remittanceAmount}</span>
                   </div>
                 </div>
@@ -248,14 +283,6 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
               </div>
 
               <div className="p-4 bg-stone-50 border-t border-stone-100 grid grid-cols-2 gap-2">
-                 {/* Open Chat */}
-                 <button
-                   onClick={() => handleOpenChat(bill.customer)}
-                   className="col-span-2 py-2 rounded-lg font-bold text-white bg-[#06C755] hover:bg-[#05b34c] text-xs flex items-center justify-center gap-2 shadow-sm"
-                 >
-                    <MessageCircle size={14} /> 開啟 LINE 對話
-                 </button>
-
                  {/* Left Action: Edit/Copy Text */}
                  <button
                    onClick={() => openEditModal(bill)}
@@ -311,6 +338,14 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
                 <div className="p-4 border-t flex gap-3">
                     <button onClick={() => setEditingBill(null)} className="py-2 px-4 text-stone-600 font-medium">取消</button>
                     
+                    {/* Send to LINE Button */}
+                    <button 
+                        onClick={handleShareToLine}
+                        className="flex-1 py-2 bg-[#06C755] text-white rounded-lg font-bold hover:bg-[#05b34c] shadow-md flex items-center justify-center gap-2"
+                    >
+                        <Send size={16} /> 傳送 LINE
+                    </button>
+
                     <button onClick={handleSaveAndCopy} className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 shadow-md flex items-center justify-center gap-2">
                         <Copy size={16} /> 複製文字
                     </button>

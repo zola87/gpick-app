@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, Customer, Order, GlobalSettings } from '../types';
-import { Plus, ShoppingBag, UserPlus, Send, ImageIcon, X, Wand2, Search, Link, Edit2, Trash2, Minus } from 'lucide-react';
+import { Plus, ShoppingBag, UserPlus, Send, ImageIcon, X, Wand2, Search, Link, Edit2, Trash2, Minus, ChevronDown, MessageSquareText, Upload } from 'lucide-react';
 import { smartParseOrder } from '../services/geminiService';
 
 interface LiveSessionProps {
@@ -14,7 +14,7 @@ interface LiveSessionProps {
   onAddOrder: (o: Order, createNewCustomer?: Customer) => void;
 }
 
-// UUID Polyfill for non-secure contexts
+// UUID Polyfill
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
@@ -23,6 +23,8 @@ const generateId = () => {
 };
 
 export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, settings, onAddProduct, onUpdateProduct, onDeleteProduct, onAddOrder }) => {
+  const topRef = useRef<HTMLDivElement>(null);
+
   // Product Form State
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
   const [newProdName, setNewProdName] = useState('');
@@ -30,13 +32,15 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
   const [newProdJPY, setNewProdJPY] = useState('');
   const [newProdTWD, setNewProdTWD] = useState('');
   const [newProdCategory, setNewProdCategory] = useState(settings.productCategories[0] || '一般');
-  const [newProdVariants, setNewProdVariants] = useState(''); // Comma separated
+  const [newProdVariants, setNewProdVariants] = useState(''); 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [isUrlMode, setIsUrlMode] = useState(false);
   
   // Order Form State
   const [selectedProduct, setSelectedProduct] = useState<string>('');
+  const [productSearchTerm, setProductSearchTerm] = useState(''); // New: For searchable dropdown
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const [selectedVariant, setSelectedVariant] = useState<string>('');
   
   // Advanced Batch Ordering State
@@ -45,14 +49,19 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
   // Autocomplete State
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
   
-  const [searchTerm, setSearchTerm] = useState('');
+  // Product List Filter
+  const [listSearchTerm, setListSearchTerm] = useState('');
   
   // Smart Magic State
+  const [isMagicModalOpen, setIsMagicModalOpen] = useState(false);
+  const [magicTab, setMagicTab] = useState<'text' | 'image'>('text');
+  const [magicText, setMagicText] = useState('');
+  const [magicImage, setMagicImage] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [smartImage, setSmartImage] = useState<string | null>(null);
 
   // Edit Product Modal State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editIsUrlMode, setEditIsUrlMode] = useState(false);
 
   // Auto-calculate TWD price when JPY changes
   useEffect(() => {
@@ -65,12 +74,24 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
     }
   }, [newProdJPY, settings]);
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, isEdit = false) => {
+  // Sync product search input with selected product
+  useEffect(() => {
+    if (selectedProduct) {
+        const p = products.find(prod => prod.id === selectedProduct);
+        if (p) setProductSearchTerm(p.name);
+    } else {
+        setProductSearchTerm('');
+    }
+  }, [selectedProduct, products]);
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, isEdit = false, isMagic = false) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        if(isEdit && editingProduct) {
+        if (isMagic) {
+            setMagicImage(reader.result as string);
+        } else if(isEdit && editingProduct) {
              setEditingProduct({...editingProduct, imageUrl: reader.result as string});
         } else {
              setImagePreview(reader.result as string);
@@ -78,6 +99,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const parseVariants = (input: string) => {
+      // Split by comma, dot, or space
+      return input.split(/[.,\s]+/).map(v => v.trim()).filter(v => v);
   };
 
   const handleCreateProduct = (e: React.FormEvent) => {
@@ -91,7 +117,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
       priceJPY: Number(newProdJPY) || 0,
       priceTWD: Number(newProdTWD),
       category: newProdCategory,
-      variants: newProdVariants ? newProdVariants.split(',').map(v => v.trim()).filter(v => v) : [],
+      variants: parseVariants(newProdVariants),
       imageUrl: isUrlMode ? imageUrlInput : (imagePreview || `https://picsum.photos/200?random=${Math.random()}`),
       createdAt: Date.now()
     };
@@ -106,72 +132,94 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
     setNewProdVariants('');
     setImagePreview(null);
     setImageUrlInput('');
-    setIsAddProductOpen(false); // Close after add
+    setIsAddProductOpen(false); 
     
     // Auto select
     setSelectedProduct(newProduct.id);
+    setProductSearchTerm(newProduct.name);
   };
 
   const handleSaveEdit = () => {
       if(editingProduct) {
-          onUpdateProduct(editingProduct);
+          // Re-parse variants just in case edited
+          const variantsArray = typeof editingProduct.variants === 'string' 
+             ? parseVariants(editingProduct.variants) 
+             : editingProduct.variants;
+             
+          onUpdateProduct({...editingProduct, variants: variantsArray});
           setEditingProduct(null);
       }
   };
 
   const handleSmartAnalyze = async () => {
-    // Logic for single text input is now a bit different with batch, assume we fill first row
-    const firstRowName = batchOrders[0].name;
-    
-    if (!smartImage && !firstRowName) return;
+    if (magicTab === 'text' && !magicText) return;
+    if (magicTab === 'image' && !magicImage) return;
     
     setIsAnalyzing(true);
     const result = await smartParseOrder({ 
-      imageBase64: smartImage || undefined,
-      text: firstRowName || undefined
+      imageBase64: magicTab === 'image' ? magicImage! : undefined,
+      text: magicTab === 'text' ? magicText : undefined
     }, products, customers);
     
     setIsAnalyzing(false);
-    setSmartImage(null);
-
+    
     if (result) {
-      if (result.customerName) updateBatchRow(0, 'name', result.customerName);
+      // 1. Fill Customer
+      if (result.customerName) {
+         updateBatchRow(0, 'name', result.customerName);
+      }
+      
+      // 2. Fill Product
       const foundProduct = products.find(p => p.name.includes(result.productName) || result.productName.includes(p.name));
       if (foundProduct) {
         setSelectedProduct(foundProduct.id);
-        if (result.variant && foundProduct.variants.includes(result.variant)) {
-           setSelectedVariant(result.variant);
+        setProductSearchTerm(foundProduct.name);
+        
+        // 3. Fill Variant
+        if (result.variant) {
+           // Try exact or partial match
+           const matchVar = foundProduct.variants.find(v => v.toLowerCase().includes(result.variant!.toLowerCase()) || result.variant!.toLowerCase().includes(v.toLowerCase()));
+           if(matchVar) setSelectedVariant(matchVar);
         }
       } else {
-        alert(`未找到商品: ${result.productName}，請先上架或手動選擇。`);
+        // If product not found but we have a name, put it in search term
+        setProductSearchTerm(result.productName);
+        alert(`提示: 未在清單中找到「${result.productName}」，請手動確認或新增商品。`);
       }
-      if (result.quantity) updateBatchRow(0, 'qty', result.quantity);
+      
+      // 4. Fill Quantity
+      if (result.quantity) {
+          updateBatchRow(0, 'qty', result.quantity);
+      }
+
+      setIsMagicModalOpen(false);
+      setMagicImage(null);
+      setMagicText('');
     } else {
-      alert("無法辨識圖片內容");
+      alert("無法辨識內容，請重試");
     }
   };
 
   const handleQuickOrder = () => {
     if (!selectedProduct) return;
 
-    // Filter out empty names
     const validOrders = batchOrders.filter(o => o.name.trim() !== '');
-    
     if(validOrders.length === 0) return;
 
     validOrders.forEach(order => {
-        // Split input by space/comma in case they still use the old way in a single row
-        const subNames = order.name.split(/[,\s\n]+/).filter(n => n.trim().length > 0);
+        // FIXED: Split input by comma or newline only (Removed Space splitting to fix "Amy Chen")
+        const subNames = order.name.split(/[,\n]+/).filter(n => n.trim().length > 0);
         
         subNames.forEach(subName => {
-             let customer = customers.find(c => c.lineName === subName || c.nickname === subName);
+             const cleanName = subName.trim();
+             let customer = customers.find(c => c.lineName === cleanName || c.nickname === cleanName);
              let newCustomer: Customer | undefined;
 
              if (!customer) {
                 newCustomer = {
                     id: generateId(),
-                    lineName: subName, // Auto create customer
-                    nickname: subName
+                    lineName: cleanName,
+                    nickname: cleanName
                 };
                 customer = newCustomer;
              }
@@ -193,9 +241,18 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
         });
     });
 
-    // Reset
+    // Reset for next order
     setBatchOrders([{name: '', qty: 1}]);
-    setSelectedVariant('');
+    // Note: We deliberately KEEP the product/variant selected for rapid fire orders of same item
+  };
+
+  const handleSelectProductFromList = (prodId: string) => {
+      setSelectedProduct(prodId);
+      const p = products.find(x => x.id === prodId);
+      if(p) setProductSearchTerm(p.name);
+      
+      // Auto scroll to top
+      topRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   // Batch Row Handlers
@@ -218,68 +275,102 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
       setBatchOrders(newOrders);
   };
 
-  const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())).reverse();
+  // Filter for the main list
+  const filteredProducts = products.filter(p => p.name.toLowerCase().includes(listSearchTerm.toLowerCase())).reverse();
+  
+  // Filter for the dropdown
+  const dropdownProducts = products.filter(p => p.name.toLowerCase().includes(productSearchTerm.toLowerCase())).reverse();
+
   const currentProduct = products.find(p => p.id === selectedProduct);
   
-  // Validation for Quick Order Button
   const isVariantRequired = currentProduct && currentProduct.variants.length > 0;
   const hasValidRows = batchOrders.some(o => o.name.trim() !== '');
   const isOrderValid = selectedProduct && hasValidRows && (!isVariantRequired || (isVariantRequired && selectedVariant));
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full relative">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full relative" ref={topRef}>
       {/* Left Column: Quick Order */}
       <div className="lg:col-span-1 space-y-4 flex flex-col">
         
         {/* Quick Order Panel */}
         <div className="bg-white p-6 rounded-xl shadow-md border border-stone-200 order-1">
-          <h2 className="text-lg font-bold mb-4 flex items-center justify-between text-blue-600">
-            <span className="flex items-center"><UserPlus className="w-5 h-5 mr-2" /> 快速喊單</span>
-            {/* Smart Parse Trigger */}
-            <div className="relative overflow-hidden inline-block w-8 h-8">
-               <input type="file" accept="image/*" className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-20" 
-                 onChange={(e) => {
-                   const file = e.target.files?.[0];
-                   if(file) {
-                     const reader = new FileReader();
-                     reader.onload = () => {
-                        setSmartImage(reader.result as string);
-                        setTimeout(() => handleSmartAnalyze(), 100); 
-                     };
-                     reader.readAsDataURL(file);
-                   }
-                 }}
-               />
-               <button className="bg-gradient-to-r from-pink-500 to-rose-500 p-1.5 rounded-full hover:scale-110 transition-transform text-white shadow-md">
-                  {isAnalyzing ? <div className="animate-spin w-5 h-5 border-2 border-white rounded-full border-t-transparent"></div> : <Wand2 size={16} />}
-               </button>
-            </div>
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+             <h2 className="text-lg font-bold text-blue-600 flex items-center">
+                <UserPlus className="w-5 h-5 mr-2" /> 快速喊單
+             </h2>
+             {/* Magic Wand Smart Parse Trigger */}
+             <button 
+                onClick={() => setIsMagicModalOpen(true)}
+                className="bg-gradient-to-r from-pink-500 to-rose-500 text-white px-3 py-1.5 rounded-full shadow-md flex items-center gap-1.5 text-xs hover:scale-105 transition-transform"
+             >
+                <Wand2 size={14} />
+                <span>AI 智慧分析</span>
+             </button>
+          </div>
 
           <div className="space-y-4">
-            <div>
+            
+            {/* Searchable Dropdown for Product */}
+            <div className="relative">
               <label className="block text-xs text-stone-400 mb-1">選擇商品</label>
-              <select 
-                value={selectedProduct}
-                onChange={(e) => {setSelectedProduct(e.target.value); setSelectedVariant('');}}
-                className="w-full bg-stone-50 border border-stone-200 rounded-lg py-3 px-3 text-stone-800 focus:ring-2 focus:ring-blue-500 text-base"
-              >
-                <option value="">-- 請選擇 --</option>
-                {products.slice().reverse().map(p => (
-                  <option key={p.id} value={p.id}>{p.name} (${p.priceTWD})</option>
-                ))}
-              </select>
+              <div className="relative">
+                  <input
+                    type="text"
+                    value={productSearchTerm}
+                    onChange={(e) => {
+                        setProductSearchTerm(e.target.value);
+                        setSelectedProduct(''); // Clear selection on type
+                        setSelectedVariant('');
+                        setIsProductDropdownOpen(true);
+                    }}
+                    onFocus={() => setIsProductDropdownOpen(true)}
+                    onBlur={() => setTimeout(() => setIsProductDropdownOpen(false), 200)}
+                    placeholder="輸入關鍵字搜尋商品..."
+                    className="w-full bg-stone-50 border border-stone-200 rounded-lg py-3 pl-3 pr-10 text-stone-800 focus:ring-2 focus:ring-blue-500 text-base"
+                  />
+                  {selectedProduct ? (
+                      <button onClick={() => {setSelectedProduct(''); setProductSearchTerm(''); setIsProductDropdownOpen(true);}} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-red-400">
+                          <X size={16}/>
+                      </button>
+                  ) : (
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 w-4 h-4 pointer-events-none" />
+                  )}
+              </div>
+              
+              {isProductDropdownOpen && (
+                  <div className="absolute top-full left-0 w-full bg-white border border-stone-200 shadow-xl rounded-lg z-50 mt-1 max-h-60 overflow-y-auto">
+                      {dropdownProducts.length === 0 ? (
+                          <div className="p-3 text-sm text-stone-400 text-center">無符合商品</div>
+                      ) : (
+                          dropdownProducts.map(p => (
+                              <button
+                                key={p.id}
+                                className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-stone-50 last:border-0 flex justify-between items-center group"
+                                onClick={() => {
+                                    setSelectedProduct(p.id);
+                                    setProductSearchTerm(p.name);
+                                    setSelectedVariant('');
+                                    setIsProductDropdownOpen(false);
+                                }}
+                              >
+                                  <span className="font-medium text-stone-700 group-hover:text-blue-600">{p.name}</span>
+                                  <span className="text-xs text-stone-400 font-mono">${p.priceTWD}</span>
+                              </button>
+                          ))
+                      )}
+                  </div>
+              )}
             </div>
 
             {currentProduct && currentProduct.variants.length > 0 && (
-              <div>
+              <div className="animate-in slide-in-from-top-2 duration-300">
                 <label className="block text-xs text-stone-400 mb-2">款式/規格 <span className="text-pink-500">*</span></label>
                 <div className="flex flex-wrap gap-2">
                   {currentProduct.variants.map(v => (
                     <button
                       key={v}
                       onClick={() => setSelectedVariant(v)}
-                      className={`px-4 py-3 rounded-lg text-sm font-bold border-2 transition-all min-w-[3rem] ${selectedVariant === v ? 'bg-blue-500 border-blue-500 text-white shadow-md' : 'border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                      className={`px-4 py-2 rounded-lg text-sm font-bold border-2 transition-all ${selectedVariant === v ? 'bg-blue-500 border-blue-500 text-white shadow-md' : 'border-stone-200 text-stone-600 hover:bg-stone-50'}`}
                     >
                       {v}
                     </button>
@@ -288,11 +379,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
               </div>
             )}
             
-            <div>
-              <div className="flex justify-between items-center mb-1">
+            <div className="border-t border-stone-100 pt-4">
+              <div className="flex justify-between items-center mb-2">
                  <label className="block text-xs text-stone-400">客人名稱 & 數量</label>
                  <button onClick={addBatchRow} className="text-xs text-blue-500 hover:text-blue-700 flex items-center font-bold">
-                    <Plus size={12} className="mr-0.5"/> 增加
+                    <Plus size={12} className="mr-0.5"/> 增加欄位
                  </button>
               </div>
               
@@ -303,7 +394,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                         ? customers.filter(c => 
                             c.lineName.toLowerCase().includes(order.name.toLowerCase()) || 
                             c.nickname?.toLowerCase().includes(order.name.toLowerCase())
-                          ).filter(c => c.lineName !== order.name).slice(0, 4) // Limit to 4
+                          ).filter(c => c.lineName !== order.name).slice(0, 4) 
                         : [];
 
                      return (
@@ -316,7 +407,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                                 onBlur={() => setTimeout(() => setFocusedRowIndex(null), 200)} // Delay so click handles first
                                 onChange={(e) => updateBatchRow(idx, 'name', e.target.value)}
                                 className="w-full bg-stone-50 border border-stone-200 rounded-lg py-2 px-3 text-stone-800 placeholder-stone-400 focus:ring-2 focus:ring-blue-500 text-sm"
-                                placeholder="客人名稱 (或現貨區)..."
+                                placeholder="客人名稱 (如: Amy Chen)"
                             />
                             {/* Dropdown */}
                             {suggestions.length > 0 && (
@@ -384,64 +475,147 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                type="text" 
                className="w-full pl-9 pr-4 py-1.5 rounded-full border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
                placeholder="搜尋商品..."
-               value={searchTerm}
-               onChange={e => setSearchTerm(e.target.value)}
+               value={listSearchTerm}
+               onChange={e => setListSearchTerm(e.target.value)}
              />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-2 sm:p-4 space-y-3">
           {filteredProducts.length === 0 && (
             <div className="text-center text-stone-400 mt-20">
               <p>無符合商品</p>
             </div>
           )}
           {filteredProducts.map(product => (
-            <div key={product.id} className="flex gap-4 p-3 border border-stone-100 rounded-lg hover:bg-stone-50 transition-colors group relative">
-              {/* Image Section - Scaled for mobile */}
-              <div className="w-20 h-20 md:w-24 md:h-24 bg-stone-100 rounded-md overflow-hidden flex-shrink-0 border border-stone-100 self-start">
+            <div key={product.id} className="flex items-start gap-3 p-2 sm:p-3 border border-stone-100 rounded-lg hover:bg-stone-50 transition-colors group relative">
+              <div className="w-16 h-16 sm:w-24 sm:h-24 bg-stone-100 rounded-md overflow-hidden flex-shrink-0 border border-stone-100">
                 <img src={product.imageUrl} alt={product.name} className="w-full h-full object-contain bg-white" />
               </div>
+              <div className="flex-1 min-w-0 flex flex-col justify-between h-full">
+                {/* Responsive Content Wrapper */}
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+                    {/* Title Section */}
+                    <div className="min-w-0 flex-1">
+                        <h4 className="font-bold text-stone-800 text-sm sm:text-base leading-tight break-words">{product.name}</h4>
+                        {product.brand && <p className="text-[10px] sm:text-xs text-stone-500 mt-0.5">{product.brand}</p>}
+                    </div>
+                    {/* Price Section - Always visible, no overlap */}
+                    <div className="text-base sm:text-lg font-bold text-blue-600 whitespace-nowrap leading-none flex-shrink-0 self-start sm:self-auto">
+                      NT$ {product.priceTWD}
+                    </div>
+                </div>
 
-              {/* Details Section - Improved Vertical Layout */}
-              <div className="flex-1 min-w-0 flex flex-col gap-1">
-                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1 sm:gap-2">
-                     <h4 className="font-bold text-stone-800 leading-tight">{product.name}</h4>
-                     <span className="text-[10px] bg-stone-200 text-stone-600 px-2 py-0.5 rounded-full self-start sm:self-auto whitespace-nowrap">{product.category}</span>
-                 </div>
-                 
-                 <div className="text-xs text-stone-500 flex flex-wrap gap-2 items-center">
-                      {product.brand && <span className="bg-stone-100 px-1.5 py-0.5 rounded text-stone-600">{product.brand}</span>}
-                      <span className="text-stone-400">¥{product.priceJPY}</span>
-                      {product.variants.length > 0 && <span className="text-stone-400">({product.variants.length} 款)</span>}
-                 </div>
-
-                 <div className="mt-auto pt-2 flex justify-between items-end">
-                     <div className="text-lg font-bold text-blue-600 leading-none">
-                         NT$ {product.priceTWD}
-                     </div>
-                     
-                     <div className="flex items-center gap-2">
-                        {/* Action Buttons */}
-                        <div className="flex gap-1">
-                             <button onClick={() => setEditingProduct(product)} className="p-1.5 rounded bg-white border border-stone-200 text-stone-400 hover:text-blue-600 hover:border-blue-300">
-                                 <Edit2 size={16}/>
-                             </button>
-                             <button onClick={() => onDeleteProduct(product.id)} className="p-1.5 rounded bg-white border border-stone-200 text-stone-400 hover:text-red-600 hover:border-red-300">
-                                 <Trash2 size={16}/>
-                             </button>
+                {/* Bottom Row: Metadata and Actions */}
+                <div className="flex justify-between items-end mt-2">
+                   <div>
+                        <span className="text-[10px] sm:text-xs bg-stone-200 text-stone-600 px-1.5 py-0.5 rounded-full">{product.category}</span>
+                        <div className="text-[10px] sm:text-sm text-stone-500 mt-1">
+                         ¥{product.priceJPY} 
+                        {product.variants.length > 0 && <span className="ml-2 text-stone-400 hidden sm:inline">款式: {product.variants.join(', ')}</span>}
                         </div>
-                        <button onClick={() => setSelectedProduct(product.id)} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-600 hover:text-white transition-colors font-bold ml-1">
-                          喊單
+                   </div>
+                   
+                   <div className="flex flex-col items-end gap-2">
+                       {/* Actions: Absolute on desktop, static flex on mobile to avoid overlap */}
+                       <div className="flex gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity bg-white/80 p-1 rounded shadow-sm border border-stone-100 absolute sm:static top-2 right-2">
+                            <button onClick={() => setEditingProduct(product)} className="text-stone-400 hover:text-blue-600 p-1"><Edit2 size={16}/></button>
+                            <button onClick={() => onDeleteProduct(product.id)} className="text-stone-400 hover:text-red-500 p-1"><Trash2 size={16}/></button>
+                       </div>
+                       
+                        <button 
+                            onClick={() => handleSelectProductFromList(product.id)}
+                            className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-blue-100 font-bold flex items-center gap-1 mt-auto whitespace-nowrap"
+                        >
+                            <ShoppingBag size={14}/> <span className="hidden sm:inline">喊單這件</span><span className="sm:hidden">喊單</span>
                         </button>
-                     </div>
-                 </div>
+                   </div>
+                </div>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Add Product Modal (New) */}
+      {/* Smart Analysis Modal */}
+      {isMagicModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
+           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="p-4 bg-gradient-to-r from-pink-500 to-rose-500 text-white flex justify-between items-center">
+                  <h3 className="font-bold flex items-center gap-2"><Wand2 size={20}/> AI 智慧分析</h3>
+                  <button onClick={() => setIsMagicModalOpen(false)}><X className="text-white/80 hover:text-white" /></button>
+              </div>
+              
+              <div className="p-6">
+                 {/* Tabs */}
+                 <div className="flex border-b border-stone-200 mb-4">
+                     <button 
+                       className={`flex-1 pb-2 text-sm font-bold flex justify-center items-center gap-2 ${magicTab === 'text' ? 'text-pink-600 border-b-2 border-pink-600' : 'text-stone-400'}`}
+                       onClick={() => setMagicTab('text')}
+                     >
+                        <MessageSquareText size={16} /> 文字分析
+                     </button>
+                     <button 
+                       className={`flex-1 pb-2 text-sm font-bold flex justify-center items-center gap-2 ${magicTab === 'image' ? 'text-pink-600 border-b-2 border-pink-600' : 'text-stone-400'}`}
+                       onClick={() => setMagicTab('image')}
+                     >
+                        <ImageIcon size={16} /> 圖片/截圖辨識
+                     </button>
+                 </div>
+
+                 <div className="min-h-[200px]">
+                    {magicTab === 'text' ? (
+                       <textarea 
+                          className="w-full h-48 border border-stone-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-pink-500 outline-none resize-none"
+                          placeholder="請貼上對話內容，例如：
+Amy: 我要兩盒止痛藥
+Jason: +1 藍色"
+                          value={magicText}
+                          onChange={(e) => setMagicText(e.target.value)}
+                       />
+                    ) : (
+                        <div className="h-48 border-2 border-dashed border-stone-300 rounded-lg flex flex-col items-center justify-center bg-stone-50 relative group cursor-pointer">
+                             {magicImage ? (
+                                 <img src={magicImage} alt="Preview" className="w-full h-full object-contain p-2" />
+                             ) : (
+                                 <div className="text-center text-stone-400">
+                                     <Upload className="mx-auto mb-2 opacity-50" size={32} />
+                                     <p className="text-xs">點擊或拖曳上傳截圖</p>
+                                 </div>
+                             )}
+                             <input 
+                                type="file" 
+                                accept="image/*" 
+                                className="absolute inset-0 opacity-0 cursor-pointer"
+                                onChange={(e) => handleImageChange(e, false, true)}
+                             />
+                        </div>
+                    )}
+                 </div>
+
+                 <button 
+                    onClick={handleSmartAnalyze}
+                    disabled={isAnalyzing}
+                    className="w-full mt-4 bg-gradient-to-r from-pink-500 to-rose-600 text-white font-bold py-3 rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.01] transition-all flex items-center justify-center gap-2"
+                 >
+                     {isAnalyzing ? (
+                         <>
+                           <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"></div>
+                           分析中...
+                         </>
+                     ) : (
+                         <>
+                           <Wand2 size={18} />
+                           開始分析填入
+                         </>
+                     )}
+                 </button>
+                 <p className="text-[10px] text-center text-stone-400 mt-2">AI 將自動辨識客人、商品、款式與數量，並填入表單供您確認。</p>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Add Product Modal */}
       {isAddProductOpen && (
           <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -517,8 +691,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                             value={newProdVariants}
                             onChange={e => setNewProdVariants(e.target.value)}
                             className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                            placeholder="款式 (如: 紅色,藍色,S,M - 逗號分隔)"
+                            placeholder="款式 (可用點號「.」或逗號「,」分隔，如: 紅色.藍色.S.M)"
                             />
+                            <p className="text-[10px] text-stone-400 mt-1">小撇步：手機輸入可用「.」或空格分隔，不用切換鍵盤</p>
                         </div>
 
                         {/* Pricing */}
@@ -591,14 +766,30 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                   </div>
                   <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
                         <div className="text-center">
-                             <div className="relative w-24 h-24 mx-auto border rounded-lg overflow-hidden cursor-pointer group">
-                                <img src={editingProduct.imageUrl} className="w-full h-full object-cover" />
-                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Edit2 className="text-white" size={20} />
-                                </div>
-                                <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleImageChange(e, true)} />
+                             <div className="flex justify-end text-xs text-blue-500 mb-1 cursor-pointer" onClick={() => setEditIsUrlMode(!editIsUrlMode)}>
+                                {editIsUrlMode ? '切換為上傳圖片' : '切換為圖片網址'}
                              </div>
-                             <p className="text-xs text-stone-400 mt-1">點擊更換圖片</p>
+                             
+                             {editIsUrlMode ? (
+                                <div className="flex items-center border rounded-lg px-2 bg-white mb-2">
+                                <Link size={16} className="text-stone-400 mr-2" />
+                                <input 
+                                    type="text" 
+                                    value={editingProduct.imageUrl || ''}
+                                    onChange={(e) => setEditingProduct({...editingProduct, imageUrl: e.target.value})}
+                                    className="w-full py-2 bg-transparent outline-none text-sm"
+                                    placeholder="圖片網址..."
+                                />
+                                </div>
+                             ) : (
+                                <div className="relative w-24 h-24 mx-auto border rounded-lg overflow-hidden cursor-pointer group">
+                                    <img src={editingProduct.imageUrl} className="w-full h-full object-cover" />
+                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Edit2 className="text-white" size={20} />
+                                    </div>
+                                    <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleImageChange(e, true)} />
+                                </div>
+                             )}
                         </div>
                         <div>
                              <label className="text-xs text-stone-500">商品名稱</label>
@@ -631,8 +822,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                              </div>
                         </div>
                         <div>
-                             <label className="text-xs text-stone-500">款式 (逗號分隔)</label>
-                             <input className="w-full border rounded px-3 py-2" value={editingProduct.variants.join(',')} onChange={e => setEditingProduct({...editingProduct, variants: e.target.value.split(',')})} />
+                             <label className="text-xs text-stone-500">款式 (可用「.」或逗號分隔)</label>
+                             <input 
+                                className="w-full border rounded px-3 py-2" 
+                                value={Array.isArray(editingProduct.variants) ? editingProduct.variants.join('.') : editingProduct.variants} 
+                                onChange={e => setEditingProduct({...editingProduct, variants: e.target.value as any})} // Temp store as string, parsed on save
+                             />
                         </div>
                   </div>
                   <div className="p-4 border-t flex gap-3">
