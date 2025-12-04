@@ -159,7 +159,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
     const result = await smartParseOrder({ 
       imageBase64: magicTab === 'image' ? magicImage! : undefined,
       text: magicTab === 'text' ? magicText : undefined
-    }, products, customers);
+    }, products, customers, settings.geminiApiKey); // Pass API Key
     
     setIsAnalyzing(false);
     
@@ -196,7 +196,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
       setMagicImage(null);
       setMagicText('');
     } else {
-      alert("無法辨識內容，請重試");
+      // Alert handled in service if API Key missing, generic here
     }
   };
 
@@ -492,7 +492,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                 <img src={product.imageUrl} alt={product.name} className="w-full h-full object-contain bg-white" />
               </div>
               <div className="flex-1 min-w-0 flex flex-col justify-between h-full">
-                {/* Responsive Content Wrapper */}
+                {/* Responsive Content Wrapper: Stacked on mobile, Row on desktop */}
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
                     {/* Title Section */}
                     <div className="min-w-0 flex-1">
@@ -516,8 +516,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
                    </div>
                    
                    <div className="flex flex-col items-end gap-2">
-                       {/* Actions: Absolute on desktop, static flex on mobile to avoid overlap */}
-                       <div className="flex gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity bg-white/80 p-1 rounded shadow-sm border border-stone-100 absolute sm:static top-2 right-2">
+                       {/* Actions: Static on mobile to avoid overlap, Absolute on desktop hover */}
+                       <div className="flex gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity bg-white/80 p-1 rounded shadow-sm border border-stone-100 static sm:absolute top-2 right-2">
                             <button onClick={() => setEditingProduct(product)} className="text-stone-400 hover:text-blue-600 p-1"><Edit2 size={16}/></button>
                             <button onClick={() => onDeleteProduct(product.id)} className="text-stone-400 hover:text-red-500 p-1"><Trash2 size={16}/></button>
                        </div>
@@ -610,6 +610,7 @@ Jason: +1 藍色"
                      )}
                  </button>
                  <p className="text-[10px] text-center text-stone-400 mt-2">AI 將自動辨識客人、商品、款式與數量，並填入表單供您確認。</p>
+                 <p className="text-[10px] text-center text-stone-300 mt-1">若無法分析，請確認系統設定中已填寫 API Key</p>
               </div>
            </div>
         </div>

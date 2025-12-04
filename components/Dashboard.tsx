@@ -50,7 +50,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
     setLoadingAi(true);
     // AI analyzes EVERYTHING (History + Current) for better trends, or just current? 
     // Request asked for "Analysis for each trip". So lets pass activeOrders.
-    const result = await analyzeSalesData(products, activeOrders, customers);
+    // Pass user API Key if available
+    const result = await analyzeSalesData(products, activeOrders, customers, settings.geminiApiKey);
     setAiAnalysis(result);
     setLoadingAi(false);
   };
@@ -161,6 +162,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
             ) : (
             <div className="bg-white/5 border border-white/10 rounded-xl p-8 text-center text-blue-200">
                 點擊「開始分析」來獲取您的專屬營運報告。
+                <br/><span className="text-xs opacity-70">(需先在系統設定中輸入 API Key)</span>
             </div>
             )}
         </div>

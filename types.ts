@@ -1,4 +1,13 @@
 
+export interface FirebaseConfig {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket: string;
+  messagingSenderId: string;
+  appId: string;
+}
+
 export interface GlobalSettings {
   jpyExchangeRate: number; // Current market rate for cost calc
   pricingRules: {
@@ -11,6 +20,11 @@ export interface GlobalSettings {
   pickupPayment: number; // usually 20
   productCategories: string[]; // Custom categories
   billingMessageTemplate: string; // New: Customizable message template
+  geminiApiKey?: string; // New: User provided API key for client-side usage
+  
+  // Cloud Sync
+  useCloudSync?: boolean;
+  firebaseConfig?: FirebaseConfig;
 }
 
 export interface Product {
@@ -64,4 +78,12 @@ export interface SalesSummary {
   totalCostJPY: number;
   totalOrders: number;
   topProducts: { name: string; count: number }[];
+}
+
+export interface TodoItem {
+  id: string;
+  content: string;
+  category: 'WISH' | 'STORE' | 'PERSONAL';
+  isCompleted: boolean;
+  createdAt: number;
 }

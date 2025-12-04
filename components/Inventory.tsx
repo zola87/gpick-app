@@ -119,7 +119,10 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
      }
   };
 
-  const handleBulkAbandon = (ordersToAbandon: Order[]) => {
+  const handleBulkAbandon = (e: React.MouseEvent, ordersToAbandon: Order[]) => {
+      e.stopPropagation();
+      e.preventDefault();
+      
       // Find stock customer ID dynamically to ensure it's fresh
       const stockCust = customers.find(c => c.isStock);
       if (!stockCust) {
@@ -144,7 +147,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
           }
           
           // CRITICAL FEEDBACK
-          alert(`已成功將 ${updates.length} 件商品移入「現貨/庫存」分頁！`);
+          alert(`成功！已將 ${updates.length} 件商品移入「現貨/庫存」分頁。`);
       }
   };
 
@@ -183,7 +186,8 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
       setStockVariant('');
   };
 
-  const handleDeleteStockItem = (orderId: string) => {
+  const handleDeleteStockItem = (e: React.MouseEvent, orderId: string) => {
+      e.stopPropagation();
       if(window.confirm('確定要刪除這筆現貨嗎？此操作無法復原。')) {
           onDeleteOrder && onDeleteOrder(orderId);
       }
@@ -269,7 +273,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                             <div className="flex items-center gap-2">
                                 <button 
                                     type="button"
-                                    onClick={() => handleBulkAbandon(pkg!.orders)}
+                                    onClick={(e) => handleBulkAbandon(e, pkg!.orders)}
                                     className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded border border-red-200 hover:bg-red-200"
                                     title="全部移入庫存"
                                 >
@@ -477,7 +481,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                                         </button>
                                         <button 
                                             type="button"
-                                            onClick={() => handleDeleteStockItem(order.id)}
+                                            onClick={(e) => handleDeleteStockItem(e, order.id)}
                                             className="p-2 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                                             title="刪除"
                                         >

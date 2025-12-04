@@ -1,12 +1,22 @@
+
 import React, { useState } from 'react';
-import { GlobalSettings } from '../types';
-import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare } from 'lucide-react';
+import { GlobalSettings, Product, Customer, Order, TodoItem } from '../types';
+import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare, Upload, RefreshCw, Key, Cloud, CloudLightning, Database } from 'lucide-react';
+import { uploadLocalDataToCloud, initFirebase } from '../services/firebaseService';
 
 interface SettingsProps {
   settings: GlobalSettings;
   onSave: (s: GlobalSettings) => void;
   onArchive?: () => void;
   onExport?: () => void;
+  onImportData?: (data: any) => void;
+  // Data for migration
+  currentData: {
+      products: Product[];
+      customers: Customer[];
+      orders: Order[];
+      todos: TodoItem[];
+  }
 }
 
 const CollapsibleSection = ({ title, icon: Icon, children, defaultOpen = false }: { title: string, icon: any, children?: React.ReactNode, defaultOpen?: boolean }) => {
@@ -32,9 +42,18 @@ const CollapsibleSection = ({ title, icon: Icon, children, defaultOpen = false }
     );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive, onExport }) => {
+export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive, onExport, onImportData, currentData }) => {
   const [localSettings, setLocalSettings] = React.useState<GlobalSettings>(settings);
   const [newCategory, setNewCategory] = useState('');
+  
+  // Firebase Form State
+  const [fbApiKey, setFbApiKey] = useState(settings.firebaseConfig?.apiKey || '');
+  const [fbAuthDomain, setFbAuthDomain] = useState(settings.firebaseConfig?.authDomain || '');
+  const [fbProjectId, setFbProjectId] = useState(settings.firebaseConfig?.projectId || '');
+  const [fbStorageBucket, setFbStorageBucket] = useState(settings.firebaseConfig?.storageBucket || '');
+  const [fbMessagingSenderId, setFbMessagingSenderId] = useState(settings.firebaseConfig?.messagingSenderId || '');
+  const [fbAppId, setFbAppId] = useState(settings.firebaseConfig?.appId || '');
+  const [isUploading, setIsUploading] = useState(false);
 
   const handleChange = (field: keyof GlobalSettings, value: any) => {
     setLocalSettings(prev => ({ ...prev, [field]: value }));
@@ -64,6 +83,115 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
       }));
   };
 
+  // Generate a full JSON backup
+  const handleBackup = () => {
+      const data = {
+          products: localStorage.getItem('gpick_products'),
+          customers: localStorage.getItem('gpick_customers'),
+          orders: localStorage.getItem('gpick_orders'),
+          settings: localStorage.getItem('gpick_settings'),
+          todos: localStorage.getItem('gpick_todos'),
+          timestamp: Date.now()
+      };
+      
+      const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `GPick_Backup_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  };
+
+  const handleRestore = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      if (!window.confirm("警告：匯入備份檔將會「完全覆蓋」目前的所有資料（商品、訂單、顧客）。\n\n確定要繼續嗎？")) {
+          e.target.value = ''; // Reset input
+          return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+          try {
+              const json = JSON.parse(event.target?.result as string);
+              if (onImportData) {
+                  onImportData(json);
+              }
+          } catch (error) {
+              alert("檔案格式錯誤，無法還原。");
+              console.error(error);
+          }
+      };
+      reader.readAsText(file);
+  };
+
+  const handleConnectCloud = () => {
+      if (!fbApiKey || !fbProjectId) {
+          alert("請填寫完整的 Firebase 設定 (API Key, Project ID)");
+          return;
+      }
+      
+      const config = {
+          apiKey: fbApiKey,
+          authDomain: fbAuthDomain,
+          projectId: fbProjectId,
+          storageBucket: fbStorageBucket,
+          messagingSenderId: fbMessagingSenderId,
+          appId: fbAppId
+      };
+      
+      // Attempt Init
+      const success = initFirebase(config);
+      if (success) {
+          // Update Settings to enable cloud
+          onSave({
+              ...localSettings,
+              useCloudSync: true,
+              firebaseConfig: config
+          });
+          alert("雲端連線成功！已切換至即時同步模式。");
+      } else {
+          alert("連線失敗，請檢查設定值。");
+      }
+  };
+
+  const handleDisableCloud = () => {
+      if(window.confirm("確定要中斷雲端連線，切換回單機模式嗎？")) {
+          onSave({
+              ...localSettings,
+              useCloudSync: false
+          });
+      }
+  };
+
+  const handleMigrateToCloud = async () => {
+      if(!settings.useCloudSync) {
+          alert("請先啟用雲端連線");
+          return;
+      }
+      if(window.confirm("這將會把您目前的「單機資料」全部上傳覆蓋至雲端資料庫。\n\n建議您先執行一次「下載備份」以防萬一。\n\n確定要上傳嗎？")) {
+          setIsUploading(true);
+          try {
+              const count = await uploadLocalDataToCloud(
+                  currentData.products,
+                  currentData.customers,
+                  currentData.orders,
+                  currentData.todos,
+                  settings
+              );
+              alert(`上傳成功！共同步了 ${count} 筆資料。`);
+          } catch(e) {
+              console.error(e);
+              alert("上傳失敗，請檢查主控台錯誤訊息。");
+          } finally {
+              setIsUploading(false);
+          }
+      }
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-6 pb-10">
       
@@ -82,6 +210,102 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
       </div>
 
       <div className="space-y-4">
+
+        {/* Cloud Sync Config Section */}
+        <div className={`p-4 rounded-xl border-2 shadow-sm transition-all ${settings.useCloudSync ? 'bg-green-50 border-green-200' : 'bg-white border-stone-200'}`}>
+             <div className="flex items-center justify-between mb-4">
+                 <div className="flex items-center gap-2 font-bold text-lg text-stone-800">
+                     <CloudLightning className={`w-6 h-6 ${settings.useCloudSync ? 'text-green-500' : 'text-stone-400'}`} />
+                     雲端即時同步 (Google Firebase)
+                 </div>
+                 {settings.useCloudSync ? (
+                     <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
+                         <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div> 連線中
+                     </span>
+                 ) : (
+                     <span className="bg-stone-100 text-stone-500 px-3 py-1 rounded-full text-xs font-bold">
+                         單機模式
+                     </span>
+                 )}
+             </div>
+
+             <div className="space-y-3">
+                 {!settings.useCloudSync && (
+                     <div className="p-3 bg-blue-50 text-blue-800 text-sm rounded-lg border border-blue-100 mb-4">
+                         <strong>多人協作必備：</strong>啟用此功能後，您與夥伴的所有操作將會透過雲端即時同步 (Real-time)。<br/>
+                         請前往 <a href="https://console.firebase.google.com/" target="_blank" className="underline font-bold">Firebase Console</a> 申請專案並取得設定碼。
+                     </div>
+                 )}
+
+                 <div className="grid grid-cols-2 gap-3">
+                     <div className="col-span-2">
+                         <label className="text-xs font-bold text-stone-500">API Key</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="AIzaSy..." value={fbApiKey} onChange={e => setFbApiKey(e.target.value)} />
+                     </div>
+                     <div>
+                         <label className="text-xs font-bold text-stone-500">Auth Domain</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="xxx.firebaseapp.com" value={fbAuthDomain} onChange={e => setFbAuthDomain(e.target.value)} />
+                     </div>
+                     <div>
+                         <label className="text-xs font-bold text-stone-500">Project ID</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="gpick-app" value={fbProjectId} onChange={e => setFbProjectId(e.target.value)} />
+                     </div>
+                     <div>
+                         <label className="text-xs font-bold text-stone-500">Storage Bucket</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="xxx.appspot.com" value={fbStorageBucket} onChange={e => setFbStorageBucket(e.target.value)} />
+                     </div>
+                     <div>
+                         <label className="text-xs font-bold text-stone-500">Messaging Sender ID</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" value={fbMessagingSenderId} onChange={e => setFbMessagingSenderId(e.target.value)} />
+                     </div>
+                     <div className="col-span-2">
+                         <label className="text-xs font-bold text-stone-500">App ID</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="1:123456789:web:xxx" value={fbAppId} onChange={e => setFbAppId(e.target.value)} />
+                     </div>
+                 </div>
+
+                 <div className="flex gap-3 mt-4 pt-2 border-t border-stone-100/50">
+                     {!settings.useCloudSync ? (
+                         <button onClick={handleConnectCloud} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold transition-colors shadow-md">
+                             連線並啟用雲端模式
+                         </button>
+                     ) : (
+                         <div className="flex gap-3 w-full">
+                             <button onClick={handleMigrateToCloud} disabled={isUploading} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold transition-colors shadow-md flex items-center justify-center gap-2">
+                                 {isUploading ? '上傳中...' : <><Upload size={16}/> 本機資料上傳至雲端</>}
+                             </button>
+                             <button onClick={handleDisableCloud} className="flex-1 bg-red-100 hover:bg-red-200 text-red-700 py-2 rounded-lg font-bold transition-colors">
+                                 中斷連線 (回單機)
+                             </button>
+                         </div>
+                     )}
+                 </div>
+             </div>
+        </div>
+
+        {/* AI API KEY Section (Priority) */}
+        <div className="bg-gradient-to-r from-stone-50 to-white p-4 rounded-lg border border-stone-200 shadow-sm">
+             <div className="flex items-center gap-2 mb-2 font-bold text-stone-700">
+                 <Key className="w-5 h-5 text-amber-500" />
+                 Gemini API Key (AI 功能專用)
+             </div>
+             <p className="text-xs text-stone-500 mb-2">
+                 若您在手機上使用 AI 魔法棒或營運分析，請在此貼上您的 API Key。<br/>
+                 (此 Key 僅儲存於您的瀏覽器，不會上傳至伺服器)
+             </p>
+             <input
+                type="text"
+                value={localSettings.geminiApiKey || ''}
+                onChange={(e) => handleChange('geminiApiKey', e.target.value)}
+                placeholder="貼上您的 API Key (例如: AIzaSy...)"
+                className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 font-mono text-sm"
+             />
+             <div className="mt-2 text-right">
+                 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">
+                     前往 Google AI Studio 獲取免費 Key &rarr;
+                 </a>
+             </div>
+        </div>
         
         {/* Basic Settings (Always Visible) */}
         <div className="bg-white p-4 rounded-lg border border-stone-200 shadow-sm">
@@ -220,6 +444,41 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
                     onChange={(e) => handleChange('billingMessageTemplate', e.target.value)}
                     className="w-full h-64 p-3 border border-stone-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500"
                  />
+             </div>
+        </CollapsibleSection>
+        
+        {/* Data Backup & Sync */}
+        <CollapsibleSection title="手動備份與還原 (單機模式用)" icon={Database}>
+             <div className="space-y-4">
+                 <div className="bg-stone-50 p-3 rounded-lg border border-stone-200 text-sm text-stone-600">
+                     <p>若您未使用雲端同步，可使用此功能手動轉移資料：</p>
+                     <ol className="list-decimal list-inside mt-2 space-y-1">
+                         <li>A裝置（例如現場喊單）：點擊<strong>「下載備份」</strong></li>
+                         <li>將檔案傳給 B裝置（例如電腦結帳）</li>
+                         <li>B裝置：點擊<strong>「匯入備份」</strong></li>
+                     </ol>
+                 </div>
+                 
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <button 
+                         onClick={handleBackup}
+                         className="flex items-center justify-center gap-2 bg-white hover:bg-stone-50 text-stone-700 py-3 rounded-lg border border-stone-300 font-bold transition-colors"
+                     >
+                         <Download size={18} />
+                         下載完整備份 (.json)
+                     </button>
+                     
+                     <label className="flex items-center justify-center gap-2 bg-stone-700 hover:bg-stone-800 text-white py-3 rounded-lg font-bold transition-colors cursor-pointer shadow-md">
+                         <Upload size={18} />
+                         匯入備份檔案
+                         <input 
+                            type="file" 
+                            accept=".json" 
+                            className="hidden" 
+                            onChange={handleRestore}
+                         />
+                     </label>
+                 </div>
              </div>
         </CollapsibleSection>
 

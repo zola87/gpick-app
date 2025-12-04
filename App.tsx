@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package } from 'lucide-react';
+import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, ClipboardList, CloudLightning } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { LiveSession } from './components/LiveSession';
 import { ShoppingList } from './components/ShoppingList';
@@ -8,7 +8,9 @@ import { Billing } from './components/Billing';
 import { CRM } from './components/CRM';
 import { Settings } from './components/Settings';
 import { Inventory } from './components/Inventory';
-import { Product, Order, Customer, GlobalSettings } from './types';
+import { TodoList } from './components/TodoList';
+import { Product, Order, Customer, GlobalSettings, TodoItem } from './types';
+import * as fbService from './services/firebaseService';
 
 // Safe ID generator for Init Data
 const safeId = () => Math.random().toString(36).substring(2, 10);
@@ -60,116 +62,232 @@ const INITIAL_SETTINGS: GlobalSettings = {
   freeShippingThreshold: 3000,
   pickupPayment: 20,
   productCategories: ['藥妝', '零食', '服飾', '雜貨', '伴手禮', '限定商品'],
-  billingMessageTemplate: DEFAULT_BILLING_TEMPLATE
+  billingMessageTemplate: DEFAULT_BILLING_TEMPLATE,
+  geminiApiKey: '',
+  useCloudSync: false
 };
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'live' | 'shopping' | 'billing' | 'crm' | 'settings' | 'inventory'>('live');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'live' | 'shopping' | 'billing' | 'crm' | 'settings' | 'inventory' | 'todo'>('live');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Global State with LocalStorage Lazy Initialization
-  const [products, setProducts] = useState<Product[]>(() => {
-    const saved = localStorage.getItem('gpick_products');
-    return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
-  });
+  // --- STATE MANAGEMENT ---
+  // Lazy init from localStorage for initial render or offline mode
+  const [products, setProducts] = useState<Product[]>(() => JSON.parse(localStorage.getItem('gpick_products') || JSON.stringify(INITIAL_PRODUCTS)));
+  const [customers, setCustomers] = useState<Customer[]>(() => JSON.parse(localStorage.getItem('gpick_customers') || JSON.stringify(INITIAL_CUSTOMERS)));
+  const [orders, setOrders] = useState<Order[]>(() => JSON.parse(localStorage.getItem('gpick_orders') || JSON.stringify(INITIAL_ORDERS)));
+  const [settings, setSettings] = useState<GlobalSettings>(() => JSON.parse(localStorage.getItem('gpick_settings') || JSON.stringify(INITIAL_SETTINGS)));
+  const [todos, setTodos] = useState<TodoItem[]>(() => JSON.parse(localStorage.getItem('gpick_todos') || '[]'));
 
-  const [customers, setCustomers] = useState<Customer[]>(() => {
-    const saved = localStorage.getItem('gpick_customers');
-    return saved ? JSON.parse(saved) : INITIAL_CUSTOMERS;
-  });
+  // Cloud Mode Flag
+  const isCloud = settings.useCloudSync && settings.firebaseConfig;
 
-  const [orders, setOrders] = useState<Order[]>(() => {
-    const saved = localStorage.getItem('gpick_orders');
-    return saved ? JSON.parse(saved) : INITIAL_ORDERS;
-  });
-
-  const [settings, setSettings] = useState<GlobalSettings>(() => {
-    const saved = localStorage.getItem('gpick_settings');
-    return saved ? JSON.parse(saved) : INITIAL_SETTINGS;
-  });
-
-  // Ensure "Stock" customer always exists (Migrate old data if needed)
+  // --- EFFECT: CLOUD SYNC ---
   useEffect(() => {
-    const hasStock = customers.some(c => c.isStock);
-    if (!hasStock) {
-      const stockUser: Customer = { 
-        id: 'stock-001', 
-        lineName: '📦 庫存/現貨區', 
-        nickname: 'Stock', 
-        isStock: true, 
-        isBlacklisted: false 
-      };
-      setCustomers(prev => [stockUser, ...prev]);
-    }
-  }, [customers.length]); // Check when list changes length or on mount
+    let unsubProd = () => {};
+    let unsubCust = () => {};
+    let unsubOrd = () => {};
+    let unsubTodo = () => {};
+    let unsubSettings = () => {};
 
-  // Persistence Effects
+    if (isCloud && settings.firebaseConfig) {
+        // Init Firebase
+        const connected = fbService.initFirebase(settings.firebaseConfig);
+        
+        if (connected) {
+            console.log("Starting Cloud Sync Listeners...");
+            
+            unsubProd = fbService.subscribeToCollection('products', (data) => setProducts(data));
+            unsubCust = fbService.subscribeToCollection('customers', (data) => setCustomers(data));
+            unsubOrd = fbService.subscribeToCollection('orders', (data) => setOrders(data));
+            unsubTodo = fbService.subscribeToCollection('todos', (data) => setTodos(data));
+            
+            // Sync Global Settings Rules (but keep local config)
+            unsubSettings = fbService.subscribeToSettings((cloudRules) => {
+                setSettings(prev => ({
+                    ...prev,
+                    ...cloudRules,
+                    // IMPORTANT: Persist the local connection config, don't let cloud overwrite it with empty
+                    firebaseConfig: prev.firebaseConfig,
+                    useCloudSync: prev.useCloudSync,
+                    geminiApiKey: prev.geminiApiKey // User's local key preference
+                }));
+            });
+        }
+    }
+
+    return () => {
+        unsubProd();
+        unsubCust();
+        unsubOrd();
+        unsubTodo();
+        unsubSettings();
+    };
+  }, [isCloud, settings.firebaseConfig]); // Re-run if cloud mode toggled or config changed
+
+  // --- EFFECT: LOCAL STORAGE SYNC (Fallback & Cache) ---
+  // Always save to local storage as backup/cache, even in cloud mode
   useEffect(() => { localStorage.setItem('gpick_products', JSON.stringify(products)); }, [products]);
   useEffect(() => { localStorage.setItem('gpick_customers', JSON.stringify(customers)); }, [customers]);
   useEffect(() => { localStorage.setItem('gpick_orders', JSON.stringify(orders)); }, [orders]);
   useEffect(() => { localStorage.setItem('gpick_settings', JSON.stringify(settings)); }, [settings]);
+  useEffect(() => { localStorage.setItem('gpick_todos', JSON.stringify(todos)); }, [todos]);
 
-  // Handlers
+  // Ensure "Stock" customer always exists
+  useEffect(() => {
+    // Only verify if we have data loaded
+    if (customers.length > 0) {
+        const hasStock = customers.some(c => c.isStock);
+        if (!hasStock) {
+            const stockUser: Customer = { 
+                id: 'stock-001', 
+                lineName: '📦 庫存/現貨區', 
+                nickname: 'Stock', 
+                isStock: true, 
+                isBlacklisted: false 
+            };
+            // Add directly via handler to ensure cloud sync works
+            if(isCloud) fbService.addDocument('customers', stockUser);
+            else setCustomers(prev => [stockUser, ...prev]);
+        }
+    }
+  }, [customers.length, isCloud]);
+
+  // --- HANDLERS (Hybrid: Cloud or Local) ---
+
+  // SETTINGS Handler
+  const handleSaveSettings = (newSettings: GlobalSettings) => {
+      // 1. Update Local State immediately (for UI responsiveness)
+      setSettings(newSettings);
+      
+      // 2. If Cloud Mode is active (or becoming active), save business rules to cloud
+      if (newSettings.useCloudSync && newSettings.firebaseConfig) {
+           fbService.initFirebase(newSettings.firebaseConfig);
+           fbService.saveSettingsToCloud(newSettings);
+      }
+  };
+
+  // PRODUCT Handlers
   const handleAddProduct = (newProduct: Product) => {
-    setProducts(prev => [...prev, newProduct]);
+    if (isCloud) fbService.addDocument('products', newProduct);
+    else setProducts(prev => [...prev, newProduct]);
   };
 
   const handleUpdateProduct = (updatedProduct: Product) => {
-    setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+    if (isCloud) fbService.updateDocument('products', updatedProduct);
+    else setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
   };
 
   const handleDeleteProduct = (productId: string) => {
     if (window.confirm('確定要刪除此商品嗎？相關訂單可能會有影響。')) {
-      setProducts(prev => prev.filter(p => p.id !== productId));
+      if (isCloud) fbService.deleteDocument('products', productId);
+      else setProducts(prev => prev.filter(p => p.id !== productId));
     }
   };
 
+  // ORDER Handlers
   const handleAddOrder = (newOrder: Order, newCustomer?: Customer) => {
-    if (newCustomer) {
-      setCustomers(prev => [...prev, newCustomer]);
+    if (isCloud) {
+        if(newCustomer) fbService.addDocument('customers', newCustomer);
+        fbService.addDocument('orders', newOrder);
+    } else {
+        if (newCustomer) setCustomers(prev => [...prev, newCustomer]);
+        setOrders(prev => [...prev, newOrder]);
     }
-    setOrders(prev => [...prev, newOrder]);
   };
 
   const handleUpdateOrder = (updatedOrder: Order) => {
-    setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+    if (isCloud) fbService.updateDocument('orders', updatedOrder);
+    else setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
   };
 
-  // Bulk Update Handler for efficient state updates
   const handleBulkUpdateOrders = (updatedOrders: Order[]) => {
-    setOrders(prev => {
-      const updatesMap = new Map(updatedOrders.map(o => [o.id, o]));
-      return prev.map(o => updatesMap.has(o.id) ? updatesMap.get(o.id)! : o);
-    });
+    if (isCloud) {
+        updatedOrders.forEach(o => fbService.updateDocument('orders', o));
+    } else {
+        setOrders(prev => {
+            const updatesMap = new Map(updatedOrders.map(o => [o.id, o]));
+            return prev.map(o => updatesMap.has(o.id) ? updatesMap.get(o.id)! : o);
+        });
+    }
   };
   
   const handleDeleteOrder = (orderId: string) => {
-      setOrders(prev => prev.filter(o => o.id !== orderId));
+      if (isCloud) fbService.deleteDocument('orders', orderId);
+      else setOrders(prev => prev.filter(o => o.id !== orderId));
   }
 
+  // CUSTOMER Handlers
   const handleUpdateCustomer = (updatedCustomer: Customer) => {
-    setCustomers(prev => prev.map(c => c.id === updatedCustomer.id ? updatedCustomer : c));
+    if (isCloud) fbService.updateDocument('customers', updatedCustomer);
+    else setCustomers(prev => prev.map(c => c.id === updatedCustomer.id ? updatedCustomer : c));
   };
   
   const handleDeleteCustomer = (customerId: string) => {
-      // Delete customer AND all their orders
-      setCustomers(prev => prev.filter(c => c.id !== customerId));
-      setOrders(prev => prev.filter(o => o.customerId !== customerId));
+      if (isCloud) {
+          fbService.deleteDocument('customers', customerId);
+          // Find and delete related orders
+          orders.filter(o => o.customerId === customerId).forEach(o => {
+              fbService.deleteDocument('orders', o.id);
+          });
+      } else {
+          setCustomers(prev => prev.filter(c => c.id !== customerId));
+          setOrders(prev => prev.filter(o => o.customerId !== customerId));
+      }
       alert('已刪除顧客及其所有關聯訂單。');
   };
 
-  // Archive all current orders (EXCEPT STOCK) to start a new trip
+  // ARCHIVE Handler
   const handleArchiveOrders = () => {
     const stockCustomerId = customers.find(c => c.isStock)?.id;
     
-    setOrders(prev => prev.map(o => {
-      // If the order belongs to stock, DO NOT archive it. It persists to next session.
-      if (o.customerId === stockCustomerId) {
-        return o;
-      }
-      return { ...o, isArchived: true };
-    }));
+    // Logic: Update isArchived = true for all orders except stock
+    const ordersToArchive = orders.filter(o => !o.isArchived && o.customerId !== stockCustomerId);
+    
+    if (isCloud) {
+        ordersToArchive.forEach(o => {
+            fbService.updateDocument('orders', { ...o, isArchived: true });
+        });
+    } else {
+        setOrders(prev => prev.map(o => {
+            if (o.customerId === stockCustomerId) return o;
+            return { ...o, isArchived: true };
+        }));
+    }
     alert('已成功封存舊訂單！現貨庫存已保留至新連線。');
+  };
+
+  // TODO Handlers
+  const handleAddTodo = (item: TodoItem) => {
+      if(isCloud) fbService.addDocument('todos', item);
+      else setTodos(prev => [item, ...prev]);
+  };
+  const handleToggleTodo = (id: string) => {
+      const item = todos.find(t => t.id === id);
+      if(item) {
+          const newItem = { ...item, isCompleted: !item.isCompleted };
+          if(isCloud) fbService.updateDocument('todos', newItem);
+          else setTodos(prev => prev.map(t => t.id === id ? newItem : t));
+      }
+  };
+  const handleDeleteTodo = (id: string) => {
+      if(isCloud) fbService.deleteDocument('todos', id);
+      else setTodos(prev => prev.filter(t => t.id !== id));
+  };
+
+  // DATA IMPORT (Legacy Manual Restore)
+  const handleImportData = (data: any) => {
+      // Import is treated as Local Restore only. Use migration button to sync to cloud.
+      if(isCloud) {
+          alert("雲端模式下請勿使用本機還原。若要上傳舊資料，請在設定頁面使用「上傳至雲端」功能。");
+          return;
+      }
+      if (data.products) setProducts(JSON.parse(data.products));
+      if (data.customers) setCustomers(JSON.parse(data.customers));
+      if (data.orders) setOrders(JSON.parse(data.orders));
+      if (data.settings) setSettings(JSON.parse(data.settings));
+      if (data.todos) setTodos(JSON.parse(data.todos));
+      alert("資料還原成功 (單機模式)！");
   };
 
   const exportToCSV = () => {
@@ -245,8 +363,11 @@ function App() {
   return (
     <div className="min-h-screen bg-stone-50 flex flex-col md:flex-row font-sans text-stone-800">
       {/* Mobile Header */}
-      <div className="md:hidden bg-white p-4 flex justify-between items-center shadow-sm z-30 sticky top-0">
-        <h1 className="text-xl font-bold text-blue-600">GPick 賺錢工具</h1>
+      <div className={`md:hidden p-4 flex justify-between items-center shadow-sm z-30 sticky top-0 transition-colors ${isCloud ? 'bg-green-50 text-green-800' : 'bg-white text-blue-600'}`}>
+        <h1 className="text-xl font-bold flex items-center gap-2">
+            GPick 賺錢工具
+            {isCloud && <CloudLightning size={16} className="text-green-500 animate-pulse"/>}
+        </h1>
         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
           {isMobileMenuOpen ? <X /> : <Menu />}
         </button>
@@ -259,8 +380,13 @@ function App() {
       `}>
         <div className="p-6 border-b border-stone-100 flex justify-between items-center md:block">
           <div>
-            <h1 className="text-2xl font-bold text-blue-600">GPick</h1>
-            <p className="text-xs text-stone-400 mt-1">日貨連線賺錢工具</p>
+            <h1 className="text-2xl font-bold text-blue-600 flex items-center gap-1">
+                GPick 
+                {isCloud && <CloudLightning size={20} className="text-green-500" title="雲端同步中"/>}
+            </h1>
+            <p className="text-xs text-stone-400 mt-1">
+                {isCloud ? '🟢 雲端即時同步中' : '⚪ 單機模式 (Local)'}
+            </p>
           </div>
           <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-stone-400">
             <X size={24} />
@@ -273,6 +399,7 @@ function App() {
           <NavItem id="inventory" label="貨物管理" icon={Package} />
           <NavItem id="billing" label="對帳結單" icon={Receipt} />
           <NavItem id="crm" label="顧客管理" icon={Users} />
+          <NavItem id="todo" label="待辦筆記" icon={ClipboardList} />
           <NavItem id="dashboard" label="營運總覽" icon={LayoutDashboard} />
           <div className="pt-4 border-t border-stone-100 mt-4">
             <NavItem id="settings" label="系統設定" icon={SettingsIcon} />
@@ -334,8 +461,23 @@ function App() {
               onDeleteOrder={handleDeleteOrder}
             />
           )}
+          {activeTab === 'todo' && (
+            <TodoList 
+              todos={todos}
+              onAddTodo={handleAddTodo}
+              onToggleTodo={handleToggleTodo}
+              onDeleteTodo={handleDeleteTodo}
+            />
+          )}
           {activeTab === 'settings' && (
-            <Settings settings={settings} onSave={setSettings} onArchive={handleArchiveOrders} onExport={exportToCSV} />
+            <Settings 
+                settings={settings} 
+                onSave={handleSaveSettings} 
+                onArchive={handleArchiveOrders} 
+                onExport={exportToCSV}
+                onImportData={handleImportData}
+                currentData={{ products, customers, orders, todos }}
+            />
           )}
         </div>
       </main>

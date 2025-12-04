@@ -2,17 +2,21 @@
 import { GoogleGenAI } from "@google/genai";
 import { Product, Order, Customer } from "../types";
 
-const getGeminiClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getGeminiClient = (apiKey?: string) => {
+  // Use the provided key, or fallback to process.env (for local dev if set)
+  const key = apiKey || process.env.API_KEY;
+  if (!key) throw new Error("API Key is missing");
+  return new GoogleGenAI({ apiKey: key });
 };
 
 export const analyzeSalesData = async (
   products: Product[],
   orders: Order[],
-  customers: Customer[]
+  customers: Customer[],
+  apiKey?: string
 ): Promise<string> => {
   try {
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(apiKey);
     
     // Calculate simple profit estimate assuming 0.23 cost rate if not provided, just for analysis
     const totalRev = orders.reduce((acc, o) => {
@@ -57,14 +61,15 @@ export const analyzeSalesData = async (
     return response.text || "無法生成分析報告。";
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
-    return "AI 分析服務暫時無法使用，請檢查 API Key 設定。";
+    return "AI 分析服務無法使用。請確認您已在「系統設定」中輸入有效的 Gemini API Key。";
   }
 };
 
 export const smartParseOrder = async (
   input: { text?: string; imageBase64?: string },
   products: Product[],
-  customers: Customer[]
+  customers: Customer[],
+  apiKey?: string
 ): Promise<{
   customerName: string;
   productName: string;
@@ -72,7 +77,7 @@ export const smartParseOrder = async (
   variant?: string;
 } | null> => {
   try {
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(apiKey);
     
     const productList = products.map(p => `${p.name} (Variants: ${p.variants.join(',')})`).join('\n');
     const customerList = customers.map(c => `${c.lineName}`).join(', ');
@@ -134,6 +139,7 @@ export const smartParseOrder = async (
 
   } catch (error) {
     console.error("Smart Parse Error", error);
+    alert("AI 分析失敗。請確認您已在「系統設定」中輸入有效的 Gemini API Key。");
     return null;
   }
 };
