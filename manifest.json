@@ -1,6 +1,7 @@
 {
+  "id": "gpick_v5",
   "short_name": "GPick",
-  "name": "GPick 賺錢工具",
+  "name": "GPick 賺錢工具 +",
   "icons": [
     {
       "src": "https://cdn-icons-png.flaticon.com/512/2953/2953363.png",
@@ -13,7 +14,7 @@
       "sizes": "512x512"
     }
   ],
-  "start_url": "index.html",
+  "start_url": "./?mode=pwa",
   "scope": "./",
   "display": "standalone",
   "theme_color": "#2563eb",
