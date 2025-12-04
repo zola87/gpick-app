@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, ClipboardList, CloudLightning } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
@@ -135,23 +134,22 @@ function App() {
 
   // Ensure "Stock" customer always exists
   useEffect(() => {
-    // Only verify if we have data loaded
-    if (customers.length > 0) {
-        const hasStock = customers.some(c => c.isStock);
-        if (!hasStock) {
-            const stockUser: Customer = { 
-                id: 'stock-001', 
-                lineName: '📦 庫存/現貨區', 
-                nickname: 'Stock', 
-                isStock: true, 
-                isBlacklisted: false 
-            };
-            // Add directly via handler to ensure cloud sync works
-            if(isCloud) fbService.addDocument('customers', stockUser);
-            else setCustomers(prev => [stockUser, ...prev]);
-        }
+    // Check if Stock user exists. If not, create it immediately.
+    // Removed customers.length > 0 check to prevent bugs when list is empty.
+    const hasStock = customers.some(c => c.isStock);
+    if (!hasStock) {
+        const stockUser: Customer = { 
+            id: 'stock-001', 
+            lineName: '📦 庫存/現貨區', 
+            nickname: 'Stock', 
+            isStock: true, 
+            isBlacklisted: false 
+        };
+        // Add directly via handler to ensure cloud sync works
+        if(isCloud) fbService.addDocument('customers', stockUser);
+        else setCustomers(prev => [stockUser, ...prev]);
     }
-  }, [customers.length, isCloud]);
+  }, [customers, isCloud]);
 
   // --- HANDLERS (Hybrid: Cloud or Local) ---
 
@@ -382,7 +380,11 @@ function App() {
           <div>
             <h1 className="text-2xl font-bold text-blue-600 flex items-center gap-1">
                 GPick 
-                {isCloud && <CloudLightning size={20} className="text-green-500" title="雲端同步中"/>}
+                {isCloud && (
+                    <span title="雲端同步中">
+                        <CloudLightning size={20} className="text-green-500"/>
+                    </span>
+                )}
             </h1>
             
             {/* Status Indicator */}
