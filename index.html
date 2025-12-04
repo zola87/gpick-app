@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="zh-TW" class="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,9 +7,21 @@
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#2563eb" />
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class', // Disable automatic media-query based dark mode
+      }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
+      :root { color-scheme: light; }
       body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+      
+      /* Force inputs to be white even if system is dark mode */
+      input, textarea, select {
+        background-color: #ffffff !important;
+        color: #1f2937 !important;
+      }
     </style>
   <script type="importmap">
 {

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { GlobalSettings, Product, Customer, Order, TodoItem } from '../types';
 import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare, Upload, RefreshCw, Key, Cloud, CloudLightning, Database } from 'lucide-react';
@@ -193,7 +192,7 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 pb-10">
+    <div className="max-w-2xl mx-auto space-y-6 pb-20">
       
       <div className="flex justify-between items-center mb-2">
           <h2 className="text-2xl font-bold text-stone-800 flex items-center gap-2">
@@ -210,104 +209,8 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
       </div>
 
       <div className="space-y-4">
-
-        {/* Cloud Sync Config Section */}
-        <div className={`p-4 rounded-xl border-2 shadow-sm transition-all ${settings.useCloudSync ? 'bg-green-50 border-green-200' : 'bg-white border-stone-200'}`}>
-             <div className="flex items-center justify-between mb-4">
-                 <div className="flex items-center gap-2 font-bold text-lg text-stone-800">
-                     <CloudLightning className={`w-6 h-6 ${settings.useCloudSync ? 'text-green-500' : 'text-stone-400'}`} />
-                     雲端即時同步 (Google Firebase)
-                 </div>
-                 {settings.useCloudSync ? (
-                     <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
-                         <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div> 連線中
-                     </span>
-                 ) : (
-                     <span className="bg-stone-100 text-stone-500 px-3 py-1 rounded-full text-xs font-bold">
-                         單機模式
-                     </span>
-                 )}
-             </div>
-
-             <div className="space-y-3">
-                 {!settings.useCloudSync && (
-                     <div className="p-3 bg-blue-50 text-blue-800 text-sm rounded-lg border border-blue-100 mb-4">
-                         <strong>多人協作必備：</strong>啟用此功能後，您與夥伴的所有操作將會透過雲端即時同步 (Real-time)。<br/>
-                         請前往 <a href="https://console.firebase.google.com/" target="_blank" className="underline font-bold">Firebase Console</a> 申請專案並取得設定碼。
-                     </div>
-                 )}
-
-                 <div className="grid grid-cols-2 gap-3">
-                     <div className="col-span-2">
-                         <label className="text-xs font-bold text-stone-500">API Key</label>
-                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="AIzaSy..." value={fbApiKey} onChange={e => setFbApiKey(e.target.value)} />
-                     </div>
-                     <div>
-                         <label className="text-xs font-bold text-stone-500">Auth Domain</label>
-                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="xxx.firebaseapp.com" value={fbAuthDomain} onChange={e => setFbAuthDomain(e.target.value)} />
-                     </div>
-                     <div>
-                         <label className="text-xs font-bold text-stone-500">Project ID</label>
-                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="gpick-app" value={fbProjectId} onChange={e => setFbProjectId(e.target.value)} />
-                     </div>
-                     <div>
-                         <label className="text-xs font-bold text-stone-500">Storage Bucket</label>
-                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="xxx.appspot.com" value={fbStorageBucket} onChange={e => setFbStorageBucket(e.target.value)} />
-                     </div>
-                     <div>
-                         <label className="text-xs font-bold text-stone-500">Messaging Sender ID</label>
-                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" value={fbMessagingSenderId} onChange={e => setFbMessagingSenderId(e.target.value)} />
-                     </div>
-                     <div className="col-span-2">
-                         <label className="text-xs font-bold text-stone-500">App ID</label>
-                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="1:123456789:web:xxx" value={fbAppId} onChange={e => setFbAppId(e.target.value)} />
-                     </div>
-                 </div>
-
-                 <div className="flex gap-3 mt-4 pt-2 border-t border-stone-100/50">
-                     {!settings.useCloudSync ? (
-                         <button onClick={handleConnectCloud} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold transition-colors shadow-md">
-                             連線並啟用雲端模式
-                         </button>
-                     ) : (
-                         <div className="flex gap-3 w-full">
-                             <button onClick={handleMigrateToCloud} disabled={isUploading} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold transition-colors shadow-md flex items-center justify-center gap-2">
-                                 {isUploading ? '上傳中...' : <><Upload size={16}/> 本機資料上傳至雲端</>}
-                             </button>
-                             <button onClick={handleDisableCloud} className="flex-1 bg-red-100 hover:bg-red-200 text-red-700 py-2 rounded-lg font-bold transition-colors">
-                                 中斷連線 (回單機)
-                             </button>
-                         </div>
-                     )}
-                 </div>
-             </div>
-        </div>
-
-        {/* AI API KEY Section (Priority) */}
-        <div className="bg-gradient-to-r from-stone-50 to-white p-4 rounded-lg border border-stone-200 shadow-sm">
-             <div className="flex items-center gap-2 mb-2 font-bold text-stone-700">
-                 <Key className="w-5 h-5 text-amber-500" />
-                 Gemini API Key (AI 功能專用)
-             </div>
-             <p className="text-xs text-stone-500 mb-2">
-                 若您在手機上使用 AI 魔法棒或營運分析，請在此貼上您的 API Key。<br/>
-                 (此 Key 僅儲存於您的瀏覽器，不會上傳至伺服器)
-             </p>
-             <input
-                type="text"
-                value={localSettings.geminiApiKey || ''}
-                onChange={(e) => handleChange('geminiApiKey', e.target.value)}
-                placeholder="貼上您的 API Key (例如: AIzaSy...)"
-                className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 font-mono text-sm"
-             />
-             <div className="mt-2 text-right">
-                 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">
-                     前往 Google AI Studio 獲取免費 Key &rarr;
-                 </a>
-             </div>
-        </div>
         
-        {/* Basic Settings (Always Visible) */}
+        {/* Basic Settings (Top Priority for daily use) */}
         <div className="bg-white p-4 rounded-lg border border-stone-200 shadow-sm">
              <div className="mb-4">
                 <label className="block text-sm font-medium text-stone-700 mb-1">目前日幣匯率 (成本計算用)</label>
@@ -481,11 +384,10 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
                  </div>
              </div>
         </CollapsibleSection>
-
       </div>
 
-      {/* Session Management Section */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-100 mt-6">
+      {/* Session Management Section (Middle Priority) */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-100 mt-6 mb-6">
         <h2 className="text-xl font-bold text-stone-800 mb-4 flex items-center gap-2">
             <Archive className="w-6 h-6 text-amber-500" />
             連線場次管理與匯出
@@ -528,6 +430,88 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
             </div>
         </div>
       </div>
+
+      {/* Advanced Settings (Cloud & AI) at Bottom */}
+      <div className="space-y-4 pt-6 border-t border-stone-200">
+         <h3 className="text-lg font-bold text-stone-500 px-1">進階功能設定</h3>
+         
+         {/* AI API KEY Section */}
+         <CollapsibleSection title="Gemini AI 設定 (魔法棒/智慧分析)" icon={Key}>
+             <p className="text-xs text-stone-500 mb-2">
+                 若您在手機上使用 AI 魔法棒或營運分析，請在此貼上您的 API Key。<br/>
+                 (此 Key 僅儲存於您的瀏覽器 LocalStorage，不會上傳至伺服器)
+             </p>
+             <input
+                type="text"
+                value={localSettings.geminiApiKey || ''}
+                onChange={(e) => handleChange('geminiApiKey', e.target.value)}
+                placeholder="貼上您的 API Key (例如: AIzaSy...)"
+                className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 font-mono text-sm"
+             />
+             <div className="mt-2 text-right">
+                 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">
+                     前往 Google AI Studio 獲取免費 Key &rarr;
+                 </a>
+             </div>
+         </CollapsibleSection>
+
+         {/* Cloud Sync Config Section */}
+         <CollapsibleSection title={`雲端即時同步 ${settings.useCloudSync ? '(連線中)' : '(單機模式)'}`} icon={CloudLightning}>
+             <div className="space-y-3">
+                 {!settings.useCloudSync && (
+                     <div className="p-3 bg-blue-50 text-blue-800 text-sm rounded-lg border border-blue-100 mb-4">
+                         <strong>多人協作必備：</strong>啟用此功能後，您與夥伴的所有操作將會透過雲端即時同步 (Real-time)。<br/>
+                         請前往 <a href="https://console.firebase.google.com/" target="_blank" className="underline font-bold">Firebase Console</a> 申請專案並取得設定碼。
+                     </div>
+                 )}
+
+                 <div className="grid grid-cols-2 gap-3">
+                     <div className="col-span-2">
+                         <label className="text-xs font-bold text-stone-500">API Key</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="AIzaSy..." value={fbApiKey} onChange={e => setFbApiKey(e.target.value)} />
+                     </div>
+                     <div>
+                         <label className="text-xs font-bold text-stone-500">Auth Domain</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="xxx.firebaseapp.com" value={fbAuthDomain} onChange={e => setFbAuthDomain(e.target.value)} />
+                     </div>
+                     <div>
+                         <label className="text-xs font-bold text-stone-500">Project ID</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="gpick-app" value={fbProjectId} onChange={e => setFbProjectId(e.target.value)} />
+                     </div>
+                     <div>
+                         <label className="text-xs font-bold text-stone-500">Storage Bucket</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="xxx.appspot.com" value={fbStorageBucket} onChange={e => setFbStorageBucket(e.target.value)} />
+                     </div>
+                     <div>
+                         <label className="text-xs font-bold text-stone-500">Messaging Sender ID</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" value={fbMessagingSenderId} onChange={e => setFbMessagingSenderId(e.target.value)} />
+                     </div>
+                     <div className="col-span-2">
+                         <label className="text-xs font-bold text-stone-500">App ID</label>
+                         <input type="text" className="w-full border rounded px-2 py-1 text-sm font-mono" placeholder="1:123456789:web:xxx" value={fbAppId} onChange={e => setFbAppId(e.target.value)} />
+                     </div>
+                 </div>
+
+                 <div className="flex gap-3 mt-4 pt-2 border-t border-stone-100/50">
+                     {!settings.useCloudSync ? (
+                         <button onClick={handleConnectCloud} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold transition-colors shadow-md">
+                             連線並啟用雲端模式
+                         </button>
+                     ) : (
+                         <div className="flex gap-3 w-full">
+                             <button onClick={handleMigrateToCloud} disabled={isUploading} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold transition-colors shadow-md flex items-center justify-center gap-2">
+                                 {isUploading ? '上傳中...' : <><Upload size={16}/> 本機資料上傳至雲端</>}
+                             </button>
+                             <button onClick={handleDisableCloud} className="flex-1 bg-red-100 hover:bg-red-200 text-red-700 py-2 rounded-lg font-bold transition-colors">
+                                 中斷連線 (回單機)
+                             </button>
+                         </div>
+                     )}
+                 </div>
+             </div>
+         </CollapsibleSection>
+      </div>
+
     </div>
   );
 };
