@@ -1,6 +1,7 @@
+
 import React, { useState } from 'react';
 import { GlobalSettings, Product, Customer, Order, TodoItem } from '../types';
-import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare, Upload, RefreshCw, Key, Cloud, CloudLightning, Database } from 'lucide-react';
+import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare, Upload, RefreshCw, Key, Cloud, CloudLightning, Database, Copy, ClipboardCheck } from 'lucide-react';
 import { uploadLocalDataToCloud, initFirebase } from '../services/firebaseService';
 
 interface SettingsProps {
@@ -53,6 +54,9 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
   const [fbMessagingSenderId, setFbMessagingSenderId] = useState(settings.firebaseConfig?.messagingSenderId || '');
   const [fbAppId, setFbAppId] = useState(settings.firebaseConfig?.appId || '');
   const [isUploading, setIsUploading] = useState(false);
+  
+  // Quick Config Paste State
+  const [pasteConfigJson, setPasteConfigJson] = useState('');
 
   const handleChange = (field: keyof GlobalSettings, value: any) => {
     setLocalSettings(prev => ({ ...prev, [field]: value }));
@@ -163,6 +167,40 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
               ...localSettings,
               useCloudSync: false
           });
+      }
+  };
+  
+  const handleCopyConfig = () => {
+      const config = {
+          apiKey: fbApiKey,
+          authDomain: fbAuthDomain,
+          projectId: fbProjectId,
+          storageBucket: fbStorageBucket,
+          messagingSenderId: fbMessagingSenderId,
+          appId: fbAppId
+      };
+      if (!config.apiKey) {
+          alert("目前沒有設定可供複製");
+          return;
+      }
+      navigator.clipboard.writeText(JSON.stringify(config));
+      alert("設定參數已複製！請傳送給您的夥伴。");
+  };
+  
+  const handlePasteConfig = () => {
+      try {
+          if (!pasteConfigJson) return;
+          const config = JSON.parse(pasteConfigJson);
+          if (config.apiKey) setFbApiKey(config.apiKey);
+          if (config.authDomain) setFbAuthDomain(config.authDomain);
+          if (config.projectId) setFbProjectId(config.projectId);
+          if (config.storageBucket) setFbStorageBucket(config.storageBucket);
+          if (config.messagingSenderId) setFbMessagingSenderId(config.messagingSenderId);
+          if (config.appId) setFbAppId(config.appId);
+          setPasteConfigJson('');
+          alert("參數已填入！請點擊下方的「連線並啟用」按鈕。");
+      } catch (e) {
+          alert("格式錯誤，請確認您複製的是完整的 JSON 文字。");
       }
   };
 
@@ -464,6 +502,36 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
                          請前往 <a href="https://console.firebase.google.com/" target="_blank" className="underline font-bold">Firebase Console</a> 申請專案並取得設定碼。
                      </div>
                  )}
+                 
+                 {/* Fast Copy/Paste Config Section */}
+                 <div className="bg-stone-50 p-3 rounded border border-stone-200 mb-4">
+                     <h4 className="text-xs font-bold text-stone-600 mb-2 flex items-center gap-1">
+                         <RefreshCw size={12}/> 快速設定 (分享給夥伴)
+                     </h4>
+                     <div className="flex gap-2">
+                         <button 
+                            onClick={handleCopyConfig}
+                            className="flex-1 bg-white border border-stone-300 text-stone-700 py-1.5 rounded text-xs font-bold hover:bg-stone-50 flex items-center justify-center gap-1"
+                         >
+                             <Copy size={12}/> 複製我的設定
+                         </button>
+                     </div>
+                     <div className="mt-2 flex gap-2">
+                         <input 
+                            type="text" 
+                            className="flex-1 border border-stone-300 rounded px-2 py-1 text-xs" 
+                            placeholder="在此貼上夥伴傳來的設定碼..."
+                            value={pasteConfigJson}
+                            onChange={e => setPasteConfigJson(e.target.value)}
+                         />
+                         <button 
+                            onClick={handlePasteConfig}
+                            className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-blue-700 flex items-center gap-1"
+                         >
+                             <ClipboardCheck size={12}/> 一鍵填入
+                         </button>
+                     </div>
+                 </div>
 
                  <div className="grid grid-cols-2 gap-3">
                      <div className="col-span-2">
