@@ -384,9 +384,25 @@ function App() {
                 GPick 
                 {isCloud && <CloudLightning size={20} className="text-green-500" title="雲端同步中"/>}
             </h1>
-            <p className="text-xs text-stone-400 mt-1">
-                {isCloud ? '🟢 雲端即時同步中' : '⚪ 單機模式 (Local)'}
-            </p>
+            
+            {/* Status Indicator */}
+            <div className="flex items-center gap-2 mt-1">
+                {isCloud ? (
+                    <>
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                        </span>
+                        <span className="text-xs text-green-600 font-bold">雲端即時同步中</span>
+                    </>
+                ) : (
+                    <>
+                        <span className="h-2.5 w-2.5 rounded-full bg-stone-300"></span>
+                        <span className="text-xs text-stone-400">單機模式 (Local)</span>
+                    </>
+                )}
+            </div>
+
           </div>
           <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-stone-400">
             <X size={24} />
