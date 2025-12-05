@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, ClipboardList, CloudLightning } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
@@ -467,8 +466,9 @@ function App() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto h-[calc(100vh-64px)] md:h-screen bg-stone-50 z-0">
-        <div className="max-w-7xl mx-auto h-full pb-20 md:pb-0">
+      {/* Changed: Removed h-screen constraint on desktop to allow natural scrolling for long content */}
+      <main className="flex-1 p-4 md:p-8 overflow-y-auto min-h-full bg-stone-50 z-0">
+        <div className="max-w-7xl mx-auto min-h-full md:h-full pb-20 md:pb-0">
           {activeTab === 'dashboard' && (
             <Dashboard products={products} orders={orders} customers={customers} settings={settings} />
           )}

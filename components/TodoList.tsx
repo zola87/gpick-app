@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { TodoItem } from '../types';
 import { CheckSquare, Square, Trash2, Plus, Sparkles, Store, ShoppingBag, ClipboardList, Image as ImageIcon, X, Eye, ExternalLink } from 'lucide-react';
@@ -87,8 +86,10 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
 
     const hasTempImage = !!tempImages[category];
 
+    // UPDATED: Use explicit height calculation for desktop [calc(100vh-160px)] instead of h-full
+    // This ensures internal scrolling works correctly even if parent height is not constrained
     return (
-      <div className={`bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden flex flex-col h-full`}>
+      <div className={`bg-white rounded-xl shadow-sm border border-stone-200 flex flex-col md:h-[calc(100vh-160px)] md:overflow-hidden min-h-[60vh] md:min-h-0`}>
         <div className={`p-4 border-b border-stone-100 flex items-center gap-2 ${bgClass}`}>
           <div className={`p-2 rounded-lg bg-white/80 ${colorClass}`}>
             {icon}
@@ -142,8 +143,9 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
           </div>
         </div>
 
-        {/* CHANGED: Removed min-h-[300px], added min-h-0 and pb-20 for better scrolling on mobile */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0 pb-20">
+        {/* Mobile: Use document scroll (auto height). Desktop: Use internal scroll (flex-1 overflow-y-auto) */}
+        {/* UPDATED: Increased md:pb-10 to allow scrolling past bottom edge comfortably */}
+        <div className="p-2 space-y-1 pb-20 md:flex-1 md:overflow-y-auto md:min-h-0 md:pb-10">
           {items.length === 0 && (
             <div className="text-center py-10 text-stone-300 text-sm">
               暫無內容
@@ -209,7 +211,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
                         e.stopPropagation();
                         if(window.confirm('確定刪除此項目？')) onDeleteTodo(item.id);
                     }}
-                    className="text-stone-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-2"
+                    className="text-stone-300 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity p-2"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -237,7 +239,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
   );
 
   return (
-    <div className="space-y-4 h-full flex flex-col">
+    <div className="space-y-4 md:h-full flex flex-col">
       <div className="flex justify-between items-center">
         <div>
             <h2 className="text-2xl font-bold text-stone-800 flex items-center gap-2">
@@ -265,20 +267,21 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-hidden">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-full">
+      {/* Changed: Removed overflow-hidden and h-full on mobile, added md: prefixes */}
+      <div className="md:flex-1 md:overflow-hidden">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:h-full">
             {/* Wishlist Section */}
-            <div className={`h-full ${activeTab === 'WISH' ? 'block' : 'hidden'} md:block`}>
+            <div className={`md:h-full ${activeTab === 'WISH' ? 'block' : 'hidden'} md:block`}>
                 {renderSection('客人許願池', 'WISH', <Sparkles size={20} />, 'text-purple-600', 'bg-purple-50')}
             </div>
             
             {/* Store Section */}
-            <div className={`h-full ${activeTab === 'STORE' ? 'block' : 'hidden'} md:block`}>
+            <div className={`md:h-full ${activeTab === 'STORE' ? 'block' : 'hidden'} md:block`}>
                 {renderSection('行程與店家', 'STORE', <Store size={20} />, 'text-amber-600', 'bg-amber-50')}
             </div>
             
             {/* Personal Section */}
-            <div className={`h-full ${activeTab === 'PERSONAL' ? 'block' : 'hidden'} md:block`}>
+            <div className={`md:h-full ${activeTab === 'PERSONAL' ? 'block' : 'hidden'} md:block`}>
                 {renderSection('自用與其他', 'PERSONAL', <ShoppingBag size={20} />, 'text-emerald-600', 'bg-emerald-50')}
             </div>
           </div>
