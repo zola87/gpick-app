@@ -66,7 +66,9 @@ export const subscribeToSettings = (
 export const addDocument = async (collectionName: string, data: any) => {
   if (!db) return;
   try {
-    await setDoc(doc(db, collectionName, data.id), data);
+    // Sanitize data: Firestore doesn't accept 'undefined' values
+    const cleanData = JSON.parse(JSON.stringify(data));
+    await setDoc(doc(db, collectionName, data.id), cleanData);
   } catch (e) {
     console.error(`Error adding to ${collectionName}`, e);
     throw e;
@@ -76,8 +78,10 @@ export const addDocument = async (collectionName: string, data: any) => {
 export const updateDocument = async (collectionName: string, data: any) => {
   if (!db) return;
   try {
+    // Sanitize data
+    const cleanData = JSON.parse(JSON.stringify(data));
     // setDoc with merge: true acts as update or create
-    await setDoc(doc(db, collectionName, data.id), data, { merge: true });
+    await setDoc(doc(db, collectionName, data.id), cleanData, { merge: true });
   } catch (e) {
     console.error(`Error updating ${collectionName}`, e);
     throw e;
@@ -101,7 +105,8 @@ export const saveSettingsToCloud = async (settings: GlobalSettings) => {
     // We only save business rules
     const { firebaseConfig, useCloudSync, geminiApiKey, ...businessRules } = settings;
     try {
-        await setDoc(doc(db, COLL_SETTINGS, 'global'), businessRules, { merge: true });
+        const cleanRules = JSON.parse(JSON.stringify(businessRules));
+        await setDoc(doc(db, COLL_SETTINGS, 'global'), cleanRules, { merge: true });
     } catch(e) {
         console.error("Error saving settings", e);
     }
@@ -126,25 +131,25 @@ export const uploadLocalDataToCloud = async (
   let count = 0;
   
   for (const p of products) {
-    await setDoc(doc(db, COLL_PRODUCTS, p.id), p);
+    await setDoc(doc(db, COLL_PRODUCTS, p.id), JSON.parse(JSON.stringify(p)));
     count++;
   }
   for (const c of customers) {
-    await setDoc(doc(db, COLL_CUSTOMERS, c.id), c);
+    await setDoc(doc(db, COLL_CUSTOMERS, c.id), JSON.parse(JSON.stringify(c)));
     count++;
   }
   for (const o of orders) {
-    await setDoc(doc(db, COLL_ORDERS, o.id), o);
+    await setDoc(doc(db, COLL_ORDERS, o.id), JSON.parse(JSON.stringify(o)));
     count++;
   }
   for (const t of todos) {
-    await setDoc(doc(db, COLL_TODOS, t.id), t);
+    await setDoc(doc(db, COLL_TODOS, t.id), JSON.parse(JSON.stringify(t)));
     count++;
   }
   
   // Upload settings
   const { firebaseConfig, useCloudSync, geminiApiKey, ...businessRules } = settings;
-  await setDoc(doc(db, COLL_SETTINGS, 'global'), businessRules);
+  await setDoc(doc(db, COLL_SETTINGS, 'global'), JSON.parse(JSON.stringify(businessRules)));
   
   return count;
 };

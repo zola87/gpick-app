@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-TW" class="light">
   <head>
@@ -6,8 +7,8 @@
     <title>GPick 賺錢工具</title>
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/2953/2953363.png" />
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2953/2953363.png" />
-    <!-- CHANGED: Use relative path ./manifest.json to fix Vercel PWA 404 issues -->
-    <link rel="manifest" href="./manifest.json?v=8" />
+    <!-- CHANGED: Use absolute path /manifest.json to fix Vercel PWA 404 issues -->
+    <link rel="manifest" href="/manifest.json?v=99" />
     <meta name="theme-color" content="#2563eb" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -24,6 +25,13 @@
       input, textarea, select {
         background-color: #ffffff !important;
         color: #1f2937 !important;
+      }
+
+      /* Force 16px font size on mobile inputs to prevent iOS zoom */
+      @media screen and (max-width: 768px) {
+        input, textarea, select {
+          font-size: 16px !important;
+        }
       }
     </style>
   <script type="importmap">

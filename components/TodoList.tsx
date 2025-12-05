@@ -1,3 +1,4 @@
+
 import React, { useState, useRef } from 'react';
 import { TodoItem } from '../types';
 import { CheckSquare, Square, Trash2, Plus, Sparkles, Store, ShoppingBag, ClipboardList, Image as ImageIcon, X, Eye, ExternalLink } from 'lucide-react';
@@ -58,23 +59,29 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
   const handleAdd = (category: TodoItem['category']) => {
     if (!newInputs[category].trim()) return;
     
-    onAddTodo({
-      id: generateId(),
-      content: newInputs[category],
-      imageUrl: tempImages[category] || undefined,
-      category,
-      isCompleted: false,
-      createdAt: Date.now()
-    });
+    try {
+        onAddTodo({
+          id: generateId(),
+          content: newInputs[category],
+          imageUrl: tempImages[category] || undefined,
+          category,
+          isCompleted: false,
+          createdAt: Date.now()
+        });
 
-    // Reset fields
-    setNewInputs(prev => ({ ...prev, [category]: '' }));
-    setTempImages(prev => ({ ...prev, [category]: null }));
+        // Reset fields
+        setNewInputs(prev => ({ ...prev, [category]: '' }));
+        setTempImages(prev => ({ ...prev, [category]: null }));
+    } catch (e) {
+        console.error("Add Todo Error", e);
+        alert("新增失敗，請重試。若為雲端模式請檢查連線。");
+    }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent, category: TodoItem['category']) => {
-    if (e.key === 'Enter') {
-      handleAdd(category);
+  const handleKeyDown = (e: React.KeyboardEvent, category: TodoItem['category']) => {
+    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+        e.preventDefault();
+        handleAdd(category);
     }
   };
 
@@ -107,9 +114,10 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
                     type="text"
                     value={newInputs[category]}
                     onChange={(e) => setNewInputs(prev => ({ ...prev, [category]: e.target.value }))}
-                    onKeyPress={(e) => handleKeyPress(e, category)}
+                    onKeyDown={(e) => handleKeyDown(e, category)}
                     placeholder="新增記事..."
-                    className={`w-full px-3 py-2 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${hasTempImage ? 'pl-10' : ''}`}
+                    // Increased font size to text-base (16px) to prevent iOS zoom
+                    className={`w-full px-3 py-2 border border-stone-200 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${hasTempImage ? 'pl-10' : ''}`}
                 />
                 {hasTempImage && (
                     <div className="absolute left-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded overflow-hidden border border-stone-300">
@@ -118,6 +126,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
                 )}
                 {hasTempImage && (
                     <button 
+                        type="button"
                         onClick={() => setTempImages(prev => ({...prev, [category]: null}))}
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-red-500 bg-white rounded-full p-0.5"
                     >
@@ -127,6 +136,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
             </div>
             
             <button 
+              type="button"
               onClick={() => triggerFileUpload(category)}
               className={`p-2 rounded-lg transition-colors border ${hasTempImage ? 'bg-blue-100 text-blue-600 border-blue-200' : 'bg-white text-stone-400 border-stone-200 hover:text-blue-500 hover:border-blue-300'}`}
               title="加入圖片"
@@ -135,6 +145,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
             </button>
             
             <button 
+              type="button"
               onClick={() => handleAdd(category)}
               className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors"
             >
@@ -226,6 +237,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
 
   const MobileTab = ({ category, label, icon: Icon, activeColorClass }: { category: TodoItem['category'], label: string, icon: any, activeColorClass: string }) => (
       <button 
+        type="button"
         onClick={() => setActiveTab(category)}
         className={`flex-1 py-3 text-sm font-bold flex flex-col items-center justify-center gap-1 transition-all border-b-2 
             ${activeTab === category 
