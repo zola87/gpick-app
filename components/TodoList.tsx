@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { TodoItem } from '../types';
 import { CheckSquare, Square, Trash2, Plus, Sparkles, Store, ShoppingBag, ClipboardList, Image as ImageIcon, X, Eye, ExternalLink } from 'lucide-react';
@@ -6,7 +5,7 @@ import { compressImage } from '../utils/imageUtils';
 
 interface TodoListProps {
   todos: TodoItem[];
-  onAddTodo: (item: TodoItem) => void;
+  onAddTodo: (item: TodoItem) => Promise<void> | void; // Allow async return
   onToggleTodo: (id: string) => void;
   onDeleteTodo: (id: string) => void;
 }
@@ -33,6 +32,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeUploadCategory, setActiveUploadCategory] = useState<TodoItem['category'] | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
 
   const generateId = () => Math.random().toString(36).substring(2, 9);
 
@@ -56,11 +56,12 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
       fileInputRef.current?.click();
   };
 
-  const handleAdd = (category: TodoItem['category']) => {
-    if (!newInputs[category].trim()) return;
+  const handleAdd = async (category: TodoItem['category']) => {
+    if (!newInputs[category].trim() || isAdding) return;
     
+    setIsAdding(true);
     try {
-        onAddTodo({
+        await onAddTodo({
           id: generateId(),
           content: newInputs[category],
           imageUrl: tempImages[category] || undefined,
@@ -69,12 +70,14 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
           createdAt: Date.now()
         });
 
-        // Reset fields
+        // Only clear if successful
         setNewInputs(prev => ({ ...prev, [category]: '' }));
         setTempImages(prev => ({ ...prev, [category]: null }));
     } catch (e) {
         console.error("Add Todo Error", e);
-        alert("新增失敗，請重試。若為雲端模式請檢查連線。");
+        // Error alert is handled in App.tsx, but we keep the input here so user doesn't lose it
+    } finally {
+        setIsAdding(false);
     }
   };
 
@@ -116,8 +119,9 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
                     onChange={(e) => setNewInputs(prev => ({ ...prev, [category]: e.target.value }))}
                     onKeyDown={(e) => handleKeyDown(e, category)}
                     placeholder="新增記事..."
+                    disabled={isAdding}
                     // Increased font size to text-base (16px) to prevent iOS zoom
-                    className={`w-full px-3 py-2 border border-stone-200 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${hasTempImage ? 'pl-10' : ''}`}
+                    className={`w-full px-3 py-2 border border-stone-200 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${hasTempImage ? 'pl-10' : ''} ${isAdding ? 'opacity-50' : ''}`}
                 />
                 {hasTempImage && (
                     <div className="absolute left-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded overflow-hidden border border-stone-300">
@@ -138,6 +142,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
             <button 
               type="button"
               onClick={() => triggerFileUpload(category)}
+              disabled={isAdding}
               className={`p-2 rounded-lg transition-colors border ${hasTempImage ? 'bg-blue-100 text-blue-600 border-blue-200' : 'bg-white text-stone-400 border-stone-200 hover:text-blue-500 hover:border-blue-300'}`}
               title="加入圖片"
             >
@@ -147,7 +152,8 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
             <button 
               type="button"
               onClick={() => handleAdd(category)}
-              className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors"
+              disabled={isAdding}
+              className={`bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors ${isAdding ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <Plus size={18} />
             </button>

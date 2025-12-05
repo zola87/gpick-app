@@ -3,7 +3,8 @@
 <html lang="zh-TW" class="light">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- CHANGED: Added maximum-scale=1.0, user-scalable=no to prevent iOS zooming on input focus -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>GPick 賺錢工具</title>
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/2953/2953363.png" />
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2953/2953363.png" />
@@ -27,12 +28,7 @@
         color: #1f2937 !important;
       }
 
-      /* Force 16px font size on mobile inputs to prevent iOS zoom */
-      @media screen and (max-width: 768px) {
-        input, textarea, select {
-          font-size: 16px !important;
-        }
-      }
+      /* REMOVED: The 16px font size hack is no longer needed because we disabled viewport scaling */
     </style>
   <script type="importmap">
 {

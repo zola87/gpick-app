@@ -296,21 +296,46 @@ function App() {
   };
 
   // TODO Handlers
-  const handleAddTodo = (item: TodoItem) => {
-      if(isCloud) fbService.addDocument('todos', item);
-      else setTodos(prev => [item, ...prev]);
+  // Promisify these to allow waiting for cloud result
+  const handleAddTodo = async (item: TodoItem) => {
+      try {
+          if(isCloud) {
+              await fbService.addDocument('todos', item);
+          } else {
+              setTodos(prev => [item, ...prev]);
+          }
+      } catch (error) {
+          alert(`新增待辦失敗 (Cloud Error): ${error}`);
+          throw error; // Rethrow so component knows it failed
+      }
   };
-  const handleToggleTodo = (id: string) => {
+  
+  const handleToggleTodo = async (id: string) => {
       const item = todos.find(t => t.id === id);
       if(item) {
           const newItem = { ...item, isCompleted: !item.isCompleted };
-          if(isCloud) fbService.updateDocument('todos', newItem);
-          else setTodos(prev => prev.map(t => t.id === id ? newItem : t));
+          try {
+              if(isCloud) {
+                  await fbService.updateDocument('todos', newItem);
+              } else {
+                  setTodos(prev => prev.map(t => t.id === id ? newItem : t));
+              }
+          } catch(error) {
+              console.error(error);
+          }
       }
   };
-  const handleDeleteTodo = (id: string) => {
-      if(isCloud) fbService.deleteDocument('todos', id);
-      else setTodos(prev => prev.filter(t => t.id !== id));
+  
+  const handleDeleteTodo = async (id: string) => {
+      try {
+          if(isCloud) {
+              await fbService.deleteDocument('todos', id);
+          } else {
+              setTodos(prev => prev.filter(t => t.id !== id));
+          }
+      } catch(error) {
+          alert(`刪除失敗: ${error}`);
+      }
   };
 
   // DATA IMPORT (Legacy Manual Restore)
