@@ -192,7 +192,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                         </div>
                         <div className="flex items-center gap-2 mt-1">
                            {item.variant && (
-                            <span className="bg-amber-100 text-amber-800 border-2 border-amber-200 text-[10px] px-1.5 py-0.5 rounded font-bold shadow-sm whitespace-nowrap">
+                            <span className="bg-white text-stone-700 border-2 border-amber-400 text-sm px-2 py-1 rounded font-bold shadow-sm whitespace-nowrap">
                               {item.variant}
                             </span>
                           )}

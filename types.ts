@@ -91,6 +91,7 @@ export interface TodoItem {
   id: string;
   content: string;
   imageUrl?: string; // Base64 compressed image
+  linkUrl?: string; // Optional URL link (Maps or Website)
   category: 'WISH' | 'STORE' | 'PERSONAL';
   isCompleted: boolean;
   createdAt: number;

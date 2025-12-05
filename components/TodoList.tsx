@@ -1,6 +1,7 @@
+
 import React, { useState, useRef } from 'react';
 import { TodoItem } from '../types';
-import { CheckSquare, Square, Trash2, Plus, Sparkles, Store, ShoppingBag, ClipboardList, Image as ImageIcon, X, Eye, ExternalLink } from 'lucide-react';
+import { CheckSquare, Square, Trash2, Plus, Sparkles, Store, ShoppingBag, ClipboardList, Image as ImageIcon, X, Eye, ExternalLink, Link as LinkIcon, MapPin } from 'lucide-react';
 import { compressImage } from '../utils/imageUtils';
 
 interface TodoListProps {
@@ -23,9 +24,18 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
       STORE: null,
       PERSONAL: null
   });
+
+  // Link State
+  const [tempLinks, setTempLinks] = useState<{ [key: string]: string | null }>({
+      WISH: null,
+      STORE: null,
+      PERSONAL: null
+  });
   
-  // View Image Modal State
+  // Modals State
   const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const [activeLinkInputCategory, setActiveLinkInputCategory] = useState<TodoItem['category'] | null>(null);
+  const [tempLinkInput, setTempLinkInput] = useState('');
 
   // State for Mobile Tabs
   const [activeTab, setActiveTab] = useState<TodoItem['category']>('WISH');
@@ -56,6 +66,19 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
       fileInputRef.current?.click();
   };
 
+  const openLinkModal = (category: TodoItem['category']) => {
+      setTempLinkInput(tempLinks[category] || '');
+      setActiveLinkInputCategory(category);
+  };
+
+  const saveLink = () => {
+      if (activeLinkInputCategory) {
+          setTempLinks(prev => ({ ...prev, [activeLinkInputCategory]: tempLinkInput.trim() || null }));
+          setActiveLinkInputCategory(null);
+          setTempLinkInput('');
+      }
+  };
+
   const handleAdd = async (category: TodoItem['category']) => {
     if (!newInputs[category].trim() || isAdding) return;
     
@@ -65,6 +88,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
           id: generateId(),
           content: newInputs[category],
           imageUrl: tempImages[category] || undefined,
+          linkUrl: tempLinks[category] || undefined,
           category,
           isCompleted: false,
           createdAt: Date.now()
@@ -73,6 +97,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
         // Only clear if successful
         setNewInputs(prev => ({ ...prev, [category]: '' }));
         setTempImages(prev => ({ ...prev, [category]: null }));
+        setTempLinks(prev => ({ ...prev, [category]: null }));
     } catch (e) {
         console.error("Add Todo Error", e);
         // Error alert is handled in App.tsx, but we keep the input here so user doesn't lose it
@@ -95,6 +120,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
     });
 
     const hasTempImage = !!tempImages[category];
+    const hasTempLink = !!tempLinks[category];
 
     // UPDATED: Use explicit height calculation for desktop [calc(100vh-160px)] instead of h-full
     // This ensures internal scrolling works correctly even if parent height is not constrained
@@ -141,9 +167,19 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
             
             <button 
               type="button"
+              onClick={() => openLinkModal(category)}
+              disabled={isAdding}
+              className={`p-2 rounded-lg transition-colors border ${hasTempLink ? 'bg-blue-100 text-blue-600 border-blue-200' : 'bg-white text-stone-400 border-stone-200 hover:text-blue-500 hover:border-blue-300'}`}
+              title="加入連結"
+            >
+              <LinkIcon size={18} />
+            </button>
+
+            <button 
+              type="button"
               onClick={() => triggerFileUpload(category)}
               disabled={isAdding}
-              className={`p-2 rounded-lg transition-colors border ${hasTempImage ? 'bg-blue-100 text-blue-600 border-blue-200' : 'bg-white text-stone-400 border-stone-200 hover:text-blue-500 hover:border-blue-300'}`}
+              className={`p-2 rounded-lg transition-colors border ${hasTempImage ? 'bg-amber-100 text-amber-600 border-amber-200' : 'bg-white text-stone-400 border-stone-200 hover:text-amber-500 hover:border-amber-300'}`}
               title="加入圖片"
             >
               <ImageIcon size={18} />
@@ -169,7 +205,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
             </div>
           )}
           {items.map(item => {
-            const isUrl = item.content.startsWith('http://') || item.content.startsWith('https://');
+            const isMap = item.linkUrl && (item.linkUrl.includes('map') || item.linkUrl.includes('goo.gl'));
             
             return (
             <div 
@@ -184,22 +220,9 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
                   {item.isCompleted ? <CheckSquare size={20} /> : <Square size={20} />}
                 </div>
                 <div className="flex flex-col min-w-0">
-                    {isUrl ? (
-                        <a 
-                            href={item.content}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className={`text-sm truncate hover:underline flex items-center gap-1 ${item.isCompleted ? 'text-stone-400' : 'text-blue-600'}`}
-                        >
-                            {item.content}
-                            <ExternalLink size={12} className="inline"/>
-                        </a>
-                    ) : (
-                        <span className={`text-sm truncate ${item.isCompleted ? 'line-through text-stone-400' : 'text-stone-700 font-medium'}`}>
-                            {item.content}
-                        </span>
-                    )}
+                    <span className={`text-sm truncate ${item.isCompleted ? 'line-through text-stone-400' : 'text-stone-700 font-medium'}`}>
+                        {item.content}
+                    </span>
                     {item.imageUrl && (
                         <span className="text-[10px] text-stone-400 flex items-center gap-1">
                             <ImageIcon size={10} /> 有附圖
@@ -209,6 +232,18 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
               </div>
               
               <div className="flex items-center gap-1">
+                  {item.linkUrl && (
+                      <a 
+                        href={item.linkUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className={`p-2 rounded-full hover:bg-blue-50 ${isMap ? 'text-red-500 hover:text-red-600' : 'text-blue-500 hover:text-blue-600'}`}
+                        title={isMap ? "開啟地圖" : "開啟連結"}
+                      >
+                          {isMap ? <MapPin size={16} /> : <ExternalLink size={16} />}
+                      </a>
+                  )}
                   {item.imageUrl && (
                       <button 
                         type="button"
@@ -216,7 +251,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
                             e.stopPropagation();
                             setViewingImage(item.imageUrl || null);
                         }}
-                        className="text-blue-400 hover:text-blue-600 p-2 rounded-full hover:bg-blue-50"
+                        className="text-amber-400 hover:text-amber-600 p-2 rounded-full hover:bg-amber-50"
                         title="查看圖片"
                       >
                           <Eye size={16} />
@@ -264,7 +299,7 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
             <ClipboardList className="text-blue-600" />
             待辦筆記
             </h2>
-            <p className="text-stone-500 text-sm mt-1 hidden md:block">隨手記錄客人許願、行程規劃與私人採購清單。(支援圖片壓縮上傳)</p>
+            <p className="text-stone-500 text-sm mt-1 hidden md:block">隨手記錄客人許願、行程規劃與私人採購清單。(支援圖片與網址連結)</p>
         </div>
       </div>
 
@@ -316,6 +351,37 @@ export const TodoList: React.FC<TodoListProps> = ({ todos, onAddTodo, onToggleTo
                   <button className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 text-white p-2 rounded-full">
                       <X size={24} />
                   </button>
+              </div>
+          </div>
+      )}
+
+      {/* Link Input Modal */}
+      {activeLinkInputCategory && (
+          <div 
+             className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm"
+             onClick={() => setActiveLinkInputCategory(null)}
+          >
+              <div 
+                className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5 animate-in zoom-in-95" 
+                onClick={e => e.stopPropagation()}
+              >
+                  <h3 className="text-lg font-bold text-stone-800 mb-3 flex items-center gap-2">
+                      <LinkIcon size={20} className="text-blue-500" />
+                      貼上連結
+                  </h3>
+                  <input 
+                      type="url"
+                      placeholder="https://..."
+                      className="w-full border border-stone-300 rounded-lg px-3 py-2 mb-4 focus:ring-2 focus:ring-blue-500 outline-none"
+                      autoFocus
+                      value={tempLinkInput}
+                      onChange={e => setTempLinkInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && saveLink()}
+                  />
+                  <div className="flex gap-3">
+                      <button onClick={() => setActiveLinkInputCategory(null)} className="flex-1 py-2 bg-stone-100 rounded-lg text-stone-600 font-bold">取消</button>
+                      <button onClick={saveLink} className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold shadow-md">確認</button>
+                  </div>
               </div>
           </div>
       )}
