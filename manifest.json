@@ -1,5 +1,5 @@
 {
-  "id": "gpick_root",
+  "id": "gpick_final",
   "short_name": "GPick",
   "name": "GPick 賺錢工具 +",
   "icons": [
@@ -14,7 +14,7 @@
       "sizes": "512x512"
     }
   ],
-  "start_url": "/",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
   "theme_color": "#2563eb",

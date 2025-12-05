@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Customer, Order, Product } from '../types';
-import { Package, User, Box, ArrowRight, CheckSquare, Square, Trash2, Search, X, Plus, Edit2, Check, XCircle } from 'lucide-react';
+import { Package, User, Box, ArrowRight, CheckSquare, Square, Trash2, Search, X, Plus, Edit2, Check, XCircle, AlertTriangle } from 'lucide-react';
 
 interface InventoryProps {
   customers: Customer[];
@@ -100,22 +100,10 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
      onUpdateOrder({ ...order, status: newStatus });
   };
 
-  const handleAbandonOrder = (order: Order) => {
-     const stockCust = customers.find(c => c.isStock);
-     if (!stockCust) {
-         alert("系統錯誤：找不到預設庫存帳號 (Stock)");
-         return;
-     }
-     if (window.confirm("確定棄單？此商品將移入「現貨/庫存區」。")) {
-         onUpdateOrder({ 
-             ...order, 
-             customerId: stockCust.id, 
-             status: 'BOUGHT', 
-             notificationStatus: 'UNNOTIFIED',
-             isPaid: false 
-         });
-         // Added feedback here just in case single abandon is used
-         // alert('已移入現貨區'); 
+  const handleRealDeleteOrder = (e: React.MouseEvent, order: Order) => {
+     e.stopPropagation();
+     if (window.confirm("確定要「永久刪除」此商品訂單嗎？\n\n(如果是Key錯請按確定，若是要移至現貨請使用上方的整單棄單)")) {
+         onDeleteOrder && onDeleteOrder(order.id);
      }
   };
 
@@ -274,10 +262,10 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                                 <button 
                                     type="button"
                                     onClick={(e) => handleBulkAbandon(e, pkg!.orders)}
-                                    className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded border border-red-200 hover:bg-red-200"
+                                    className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded border border-red-200 hover:bg-red-200 flex items-center gap-1"
                                     title="全部移入庫存"
                                 >
-                                    整單棄單
+                                    <AlertTriangle size={12} /> 整單棄單
                                 </button>
                                 {pkg!.isFullyPacked && <span className="text-xs bg-green-200 text-green-800 px-2 py-1 rounded-full font-bold">已打包</span>}
                             </div>
@@ -339,9 +327,9 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                                                     </button>
                                                     <button 
                                                         type="button"
-                                                        onClick={() => handleAbandonOrder(order)}
+                                                        onClick={(e) => handleRealDeleteOrder(e, order)}
                                                         className="text-stone-300 hover:text-red-500 p-1"
-                                                        title="棄單 (移至現貨)"
+                                                        title="刪除錯誤訂單 (Key錯用)"
                                                     >
                                                         <Trash2 size={16} />
                                                     </button>

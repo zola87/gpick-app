@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { GlobalSettings, Product, Customer, Order, TodoItem } from '../types';
-import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare, Upload, RefreshCw, Key, Cloud, CloudLightning, Database, Copy, ClipboardCheck } from 'lucide-react';
+import { Save, Settings as SettingsIcon, Plus, X, Archive, AlertCircle, Download, ChevronDown, ChevronRight, MessageSquare, Upload, RefreshCw, Key, Cloud, CloudLightning, Database, Copy, ClipboardCheck, Users } from 'lucide-react';
 import { uploadLocalDataToCloud, initFirebase } from '../services/firebaseService';
 
 interface SettingsProps {
@@ -366,6 +366,37 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
             </div>
           </div>
         </CollapsibleSection>
+        
+        {/* Customer Levels */}
+        <CollapsibleSection title="會員分級門檻 (CRM)" icon={Users}>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div>
+                     <label className="block text-sm font-medium text-stone-700 mb-1">VIP (銀牌) 累積消費門檻</label>
+                     <div className="relative">
+                         <input 
+                            type="number"
+                            value={localSettings.customerLevels?.vip || 10000}
+                            onChange={(e) => setLocalSettings(prev => ({ ...prev, customerLevels: { ...prev.customerLevels, vip: Number(e.target.value) } }))}
+                            className="w-full px-3 py-2 border border-stone-300 rounded-lg pl-8"
+                         />
+                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400">$</span>
+                     </div>
+                 </div>
+                 <div>
+                     <label className="block text-sm font-medium text-stone-700 mb-1">VVIP (金牌) 累積消費門檻</label>
+                     <div className="relative">
+                         <input 
+                            type="number"
+                            value={localSettings.customerLevels?.vvip || 30000}
+                            onChange={(e) => setLocalSettings(prev => ({ ...prev, customerLevels: { ...prev.customerLevels, vvip: Number(e.target.value) } }))}
+                            className="w-full px-3 py-2 border border-stone-300 rounded-lg pl-8"
+                         />
+                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400">$</span>
+                     </div>
+                 </div>
+             </div>
+             <p className="text-xs text-stone-500 mt-2">顧客歷史累積消費達到此金額將自動升級，並顯示於 CRM 列表中。</p>
+        </CollapsibleSection>
 
         {/* Message Templates */}
         <CollapsibleSection title="通知訊息模版" icon={MessageSquare}>
@@ -453,17 +484,18 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onArchive,
                 </h3>
                  <p className="text-xs text-amber-700 mb-3">
                     封存「進行中」的訂單，清空採購清單以開始新連線。<br/>
-                    <strong>現貨庫存(Stock)將會保留。</strong>
+                    <strong>現貨庫存(Stock)將會保留。</strong><br/>
+                    <span className="text-amber-900 font-bold mt-1 block">客人的累積消費與跟團次數將會自動更新。</span>
                 </p>
                 <button
                     onClick={() => {
-                        if(window.confirm('確定要結束本次連線並封存所有訂單嗎？現貨庫存將會保留，但其他訂單將移入歷史紀錄。')) {
+                        if(window.confirm('確定要結束本次連線並封存所有訂單嗎？\n\n1. 現貨庫存將保留\n2. 客人消費累積將更新\n3. 本次訂單將移入歷史紀錄')) {
                             onArchive && onArchive();
                         }
                     }}
                     className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 rounded-lg text-sm transition-colors"
                 >
-                    封存舊訂單
+                    封存並結算場次
                 </button>
             </div>
         </div>

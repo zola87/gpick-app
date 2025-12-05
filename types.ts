@@ -25,6 +25,12 @@ export interface GlobalSettings {
   // Cloud Sync
   useCloudSync?: boolean;
   firebaseConfig?: FirebaseConfig;
+
+  // CRM Levels
+  customerLevels: {
+      vip: number;
+      vvip: number;
+  };
 }
 
 export interface Product {
@@ -53,6 +59,7 @@ export interface Customer {
   lastFiveDigits?: string; // Bank account
   isStock?: boolean; // New: Identifies the virtual inventory holder
   chatUrl?: string; // New: Direct link to LINE chat
+  sessionCount?: number; // New: Number of sessions participated
 }
 
 export interface Order {
@@ -83,6 +90,7 @@ export interface SalesSummary {
 export interface TodoItem {
   id: string;
   content: string;
+  imageUrl?: string; // Base64 compressed image
   category: 'WISH' | 'STORE' | 'PERSONAL';
   isCompleted: boolean;
   createdAt: number;

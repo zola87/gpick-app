@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Product, Customer, Order, GlobalSettings } from '../types';
 import { Plus, ShoppingBag, UserPlus, Send, ImageIcon, X, Wand2, Search, Link, Edit2, Trash2, Minus, ChevronDown, MessageSquareText, Upload } from 'lucide-react';
 import { smartParseOrder } from '../services/geminiService';
+import { compressImage } from '../utils/imageUtils';
 
 interface LiveSessionProps {
   products: Product[];
@@ -84,20 +85,24 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
     }
   }, [selectedProduct, products]);
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, isEdit = false, isMagic = false) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>, isEdit = false, isMagic = false) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
+      try {
+        // Compress image before setting state
+        const compressed = await compressImage(file);
+        
         if (isMagic) {
-            setMagicImage(reader.result as string);
+            setMagicImage(compressed);
         } else if(isEdit && editingProduct) {
-             setEditingProduct({...editingProduct, imageUrl: reader.result as string});
+             setEditingProduct({...editingProduct, imageUrl: compressed});
         } else {
-             setImagePreview(reader.result as string);
+             setImagePreview(compressed);
         }
-      };
-      reader.readAsDataURL(file);
+      } catch (error) {
+        console.error("Image compression error", error);
+        alert("圖片處理失敗，請重試");
+      }
     }
   };
 

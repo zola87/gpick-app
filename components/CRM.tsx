@@ -1,17 +1,18 @@
 
 import React, { useState } from 'react';
-import { Customer, Order, Product } from '../types';
-import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle, ExternalLink, Trash2 } from 'lucide-react';
+import { Customer, Order, Product, GlobalSettings } from '../types';
+import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle, ExternalLink, Trash2, StickyNote, Award, Crown, Sprout, Skull, History } from 'lucide-react';
 
 interface CRMProps {
   customers: Customer[];
   orders: Order[];
   products: Product[];
+  settings: GlobalSettings;
   onUpdateCustomer: (c: Customer) => void;
   onDeleteCustomer?: (id: string) => void;
 }
 
-export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateCustomer, onDeleteCustomer }) => {
+export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings, onUpdateCustomer, onDeleteCustomer }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -24,6 +25,13 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
         c.realName?.toLowerCase().includes(searchTerm.toLowerCase())
     )
   );
+
+  const getCustomerLevel = (spent: number) => {
+      const levels = settings.customerLevels || { vip: 10000, vvip: 30000 };
+      if (spent >= levels.vvip) return { label: 'VVIP', icon: <Crown size={14} className="text-yellow-500 fill-current"/>, bg: 'bg-yellow-50 text-yellow-700 border-yellow-200' };
+      if (spent >= levels.vip) return { label: 'VIP', icon: <Award size={14} className="text-blue-500 fill-current"/>, bg: 'bg-blue-50 text-blue-700 border-blue-200' };
+      return { label: '一般', icon: <Sprout size={14} className="text-green-500"/>, bg: 'bg-stone-50 text-stone-600 border-stone-200' };
+  };
 
   const analyzeCustomer = (customerId: string) => {
     // Include ALL orders (History + Current) for CRM analysis
@@ -106,33 +114,65 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
           const isEditing = editingId === customer.id;
           const isExpanded = expandedId === customer.id;
           const stats = analyzeCustomer(customer.id);
+          const levelInfo = getCustomerLevel(customer.totalSpent || 0);
 
           return (
             <div key={customer.id} className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-all ${customer.isBlacklisted ? 'border-red-200 bg-red-50' : 'border-stone-200'}`}>
               
               {/* Card Header (Always Visible) */}
               <div className={`p-4 border-b flex justify-between items-center ${customer.isBlacklisted ? 'bg-red-100/50' : 'bg-stone-50'}`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${customer.isBlacklisted ? 'bg-red-500' : 'bg-blue-500'}`}>
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0 ${customer.isBlacklisted ? 'bg-red-500' : 'bg-blue-500'}`}>
                     {customer.lineName.charAt(0).toUpperCase()}
                   </div>
-                  <div>
+                  <div className="flex-1 min-w-0">
                     {isEditing ? (
-                      <input 
-                        className="text-sm border rounded px-1 w-32" 
-                        value={editForm.lineName} 
-                        onChange={e => setEditForm({...editForm, lineName: e.target.value})}
-                      />
+                      <div className="flex flex-col gap-2">
+                          <div className="relative">
+                            <input 
+                                className="text-sm font-bold border rounded px-1 w-full" 
+                                value={editForm.lineName} 
+                                onChange={e => setEditForm({...editForm, lineName: e.target.value})}
+                            />
+                            <span className="text-[10px] text-stone-400 absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none">LINE 名稱</span>
+                          </div>
+                          <div className="relative">
+                            <input 
+                                className="text-xs border rounded px-1 w-full text-stone-600" 
+                                value={editForm.nickname || ''} 
+                                onChange={e => setEditForm({...editForm, nickname: e.target.value})}
+                            />
+                            <span className="text-[10px] text-stone-400 absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none">社群暱稱</span>
+                          </div>
+                      </div>
                     ) : (
-                      <h3 className="font-bold text-stone-800">{customer.lineName}</h3>
+                      <div className="flex flex-wrap items-center gap-2">
+                          <div className="truncate max-w-full">
+                            <h3 className="font-bold text-stone-800 truncate">{customer.lineName}</h3>
+                            <p className="text-xs text-stone-500 truncate">{customer.nickname || '無暱稱'}</p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                              {/* Level Badge */}
+                              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold whitespace-nowrap ${levelInfo.bg}`}>
+                                  {levelInfo.icon}
+                                  {levelInfo.label}
+                              </div>
+                              {/* Blacklist Badge */}
+                              {customer.isBlacklisted && (
+                                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold whitespace-nowrap bg-stone-800 text-white border-stone-900">
+                                      <Skull size={12} />
+                                      棄單紀錄
+                                  </div>
+                              )}
+                          </div>
+                      </div>
                     )}
-                    <p className="text-xs text-stone-500">{customer.nickname || '無暱稱'}</p>
                   </div>
                 </div>
-                <div className="flex gap-2 items-center">
+                <div className="flex gap-2 items-center flex-shrink-0 ml-2">
                   {customer.chatUrl && (
                       <a href={customer.chatUrl} target="_blank" rel="noreferrer" className="text-xs bg-[#06C755] text-white px-2 py-1 rounded-full flex items-center gap-1 hover:bg-[#05b34c]">
-                          <MessageCircle size={12}/> Chat
+                          <MessageCircle size={12}/>
                       </a>
                   )}
                   <button onClick={() => toggleExpand(customer.id)} className="text-stone-400 hover:text-stone-600">
@@ -144,6 +184,24 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
               {/* Expandable Content */}
               {isExpanded && (
                 <div className="p-4 space-y-3 text-sm bg-white animate-in slide-in-from-top-2 duration-200">
+                    {/* Stats Dashboard */}
+                    <div className="grid grid-cols-3 gap-2 bg-stone-50 p-2 rounded-lg border border-stone-100 mb-2">
+                        <div className="text-center">
+                            <p className="text-[10px] text-stone-400">累積消費</p>
+                            <p className="font-bold text-blue-600 text-sm">
+                                ${((customer.totalSpent || 0) / 1000).toFixed(1)}k
+                            </p>
+                        </div>
+                        <div className="text-center border-l border-stone-200">
+                            <p className="text-[10px] text-stone-400">總件數</p>
+                            <p className="font-bold text-stone-700 text-sm">{stats.count} 件</p>
+                        </div>
+                         <div className="text-center border-l border-stone-200">
+                            <p className="text-[10px] text-stone-400">跟團次數</p>
+                            <p className="font-bold text-purple-600 text-sm">{customer.sessionCount || 0} 次</p>
+                        </div>
+                    </div>
+
                     <div className="flex justify-end gap-2 mb-2">
                         {isEditing ? (
                             <>
@@ -234,10 +292,28 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
                     )}
                     </div>
 
+                    {/* Manual Note/Preferences */}
+                    <div className="flex items-start gap-2 text-stone-600 border-t border-stone-100 pt-3">
+                        <StickyNote size={14} className="text-stone-400 mt-0.5" />
+                        <span className="w-16 text-stone-400 flex-shrink-0">備註/喜好:</span>
+                        {isEditing ? (
+                            <textarea 
+                                className="flex-1 border rounded px-1 h-20 text-xs" 
+                                placeholder="手動輸入客人備註..."
+                                value={editForm.note || ''} 
+                                onChange={e => setEditForm({...editForm, note: e.target.value})} 
+                            />
+                        ) : (
+                             <p className="flex-1 text-stone-700 bg-stone-50 p-2 rounded text-xs whitespace-pre-line">
+                                 {customer.note || <span className="text-stone-300">無備註</span>}
+                             </p>
+                        )}
+                    </div>
+
                     {/* Analysis Section */}
                     <div className="pt-3 mt-3 border-t border-stone-100 bg-blue-50/50 p-2 rounded-lg">
                         <h4 className="text-xs font-bold text-blue-600 flex items-center gap-1 mb-2">
-                            <BarChart2 size={12}/> 消費喜好分析
+                            <BarChart2 size={12}/> 消費喜好分析 (AI)
                         </h4>
                         <div className="grid grid-cols-2 gap-2 text-xs">
                             <div>
@@ -252,6 +328,35 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
                     </div>
 
                     {isEditing && (
+                        <>
+                        {/* Manual History Adjustment */}
+                        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                            <h4 className="text-xs font-bold text-amber-800 mb-2 flex items-center gap-1">
+                                <History size={12}/> 歷史數據補登
+                            </h4>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[10px] text-amber-700 block mb-1">累積消費金額 ($)</label>
+                                    <input 
+                                        type="number"
+                                        className="w-full border border-amber-300 rounded px-2 py-1 text-sm bg-white"
+                                        value={editForm.totalSpent || 0}
+                                        onChange={e => setEditForm({...editForm, totalSpent: Number(e.target.value)})}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] text-amber-700 block mb-1">跟團次數</label>
+                                    <input 
+                                        type="number"
+                                        className="w-full border border-amber-300 rounded px-2 py-1 text-sm bg-white"
+                                        value={editForm.sessionCount || 0}
+                                        onChange={e => setEditForm({...editForm, sessionCount: Number(e.target.value)})}
+                                    />
+                                </div>
+                            </div>
+                            <p className="text-[10px] text-amber-600 mt-2">輸入之前的消費紀錄，系統將自動重新計算會員等級。</p>
+                        </div>
+
                         <div className="mt-4 flex items-center gap-2 pt-2 border-t border-stone-100">
                         <input 
                             type="checkbox" 
@@ -263,6 +368,7 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, onUpdateC
                             <AlertTriangle size={14} /> 加入黑名單 (棄單)
                         </label>
                         </div>
+                        </>
                     )}
                 </div>
               )}

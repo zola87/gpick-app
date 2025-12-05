@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, ClipboardList, CloudLightning } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
@@ -21,8 +22,8 @@ const INITIAL_PRODUCTS: Product[] = [
 
 const INITIAL_CUSTOMERS: Customer[] = [
   { id: 'stock-001', lineName: '📦 庫存/現貨區', nickname: 'Stock', isStock: true, isBlacklisted: false },
-  { id: safeId(), lineName: 'Amy Chen', nickname: 'Amy', note: 'VIP', isBlacklisted: false },
-  { id: safeId(), lineName: 'Jason Wang', nickname: 'Jason', isBlacklisted: false },
+  { id: safeId(), lineName: 'Amy Chen', nickname: 'Amy', note: 'VIP', isBlacklisted: false, totalSpent: 0, sessionCount: 0 },
+  { id: safeId(), lineName: 'Jason Wang', nickname: 'Jason', isBlacklisted: false, totalSpent: 0, sessionCount: 0 },
 ];
 
 const INITIAL_ORDERS: Order[] = [
@@ -63,7 +64,11 @@ const INITIAL_SETTINGS: GlobalSettings = {
   productCategories: ['藥妝', '零食', '服飾', '雜貨', '伴手禮', '限定商品'],
   billingMessageTemplate: DEFAULT_BILLING_TEMPLATE,
   geminiApiKey: '',
-  useCloudSync: false
+  useCloudSync: false,
+  customerLevels: {
+      vip: 10000,
+      vvip: 30000
+  }
 };
 
 function App() {
@@ -240,19 +245,55 @@ function App() {
     const stockCustomerId = customers.find(c => c.isStock)?.id;
     
     // Logic: Update isArchived = true for all orders except stock
-    const ordersToArchive = orders.filter(o => !o.isArchived && o.customerId !== stockCustomerId);
+    const activeOrders = orders.filter(o => !o.isArchived && o.customerId !== stockCustomerId);
     
+    // 1. Calculate stats for this session to update customer levels
+    const sessionStats = new Map<string, number>(); // customerId -> spent amount in this session
+    
+    activeOrders.forEach(o => {
+        const p = products.find(prod => prod.id === o.productId);
+        if(p) {
+            const current = sessionStats.get(o.customerId) || 0;
+            sessionStats.set(o.customerId, current + (p.priceTWD * o.quantity));
+        }
+    });
+
     if (isCloud) {
-        ordersToArchive.forEach(o => {
+        // Update Customer Stats
+        sessionStats.forEach((spent, custId) => {
+            const cust = customers.find(c => c.id === custId);
+            if(cust) {
+                const newTotal = (cust.totalSpent || 0) + spent;
+                const newCount = (cust.sessionCount || 0) + 1;
+                fbService.updateDocument('customers', { id: custId, totalSpent: newTotal, sessionCount: newCount });
+            }
+        });
+        
+        // Archive Orders
+        activeOrders.forEach(o => {
             fbService.updateDocument('orders', { ...o, isArchived: true });
         });
     } else {
+        // Update Customer Stats Locally
+        setCustomers(prev => prev.map(c => {
+            if(sessionStats.has(c.id)) {
+                return {
+                    ...c,
+                    totalSpent: (c.totalSpent || 0) + sessionStats.get(c.id)!,
+                    sessionCount: (c.sessionCount || 0) + 1
+                };
+            }
+            return c;
+        }));
+
+        // Archive Orders Locally
         setOrders(prev => prev.map(o => {
             if (o.customerId === stockCustomerId) return o;
+            if (o.isArchived) return o;
             return { ...o, isArchived: true };
         }));
     }
-    alert('已成功封存舊訂單！現貨庫存已保留至新連線。');
+    alert('已成功封存舊訂單！\n有消費的顧客之「累積消費」與「跟團次數」已更新。');
   };
 
   // TODO Handlers
@@ -436,6 +477,7 @@ function App() {
                 customers={customers} 
                 orders={orders} 
                 products={products} 
+                settings={settings}
                 onUpdateCustomer={handleUpdateCustomer} 
                 onDeleteCustomer={handleDeleteCustomer}
              />
