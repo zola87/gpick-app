@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, ClipboardList, CloudLightning } from 'lucide-react';
+import React, { useState, useEffect, Component, ErrorInfo } from 'react';
+import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, ClipboardList, CloudLightning, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { LiveSession } from './components/LiveSession';
 import { ShoppingList } from './components/ShoppingList';
@@ -72,7 +72,68 @@ const INITIAL_SETTINGS: GlobalSettings = {
   currentAiAnalysis: ''
 };
 
-function App() {
+// Error Boundary Component
+class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  handleEmergencyReset = () => {
+      // Clear cloud settings to force local mode
+      const currentSettings = JSON.parse(localStorage.getItem('gpick_settings') || '{}');
+      const resetSettings = {
+          ...currentSettings,
+          useCloudSync: false,
+          firebaseConfig: undefined
+      };
+      localStorage.setItem('gpick_settings', JSON.stringify(resetSettings));
+      window.location.reload();
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-stone-100 p-4">
+          <div className="bg-white p-8 rounded-xl shadow-xl max-w-md w-full text-center">
+            <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle size={32} />
+            </div>
+            <h1 className="text-xl font-bold text-stone-800 mb-2">系統發生錯誤</h1>
+            <p className="text-stone-500 mb-6 text-sm">
+                很抱歉，應用程式發生了預期外的崩潰 (通常是雲端連線或版本衝突導致)。
+            </p>
+            <div className="bg-stone-50 p-3 rounded text-left text-xs font-mono text-red-500 mb-6 overflow-auto max-h-32">
+                {this.state.error?.toString()}
+            </div>
+            <button 
+                onClick={this.handleEmergencyReset}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-md transition-colors"
+            >
+                <RefreshCw size={18} />
+                緊急重設 (切回單機模式)
+            </button>
+            <p className="text-xs text-stone-400 mt-4">
+                此操作不會刪除您的資料，只會暫時關閉雲端連線以恢復畫面。
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+function MainApp() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'live' | 'shopping' | 'billing' | 'crm' | 'settings' | 'inventory' | 'todo'>('live');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -640,4 +701,10 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+    return (
+        <ErrorBoundary>
+            <MainApp />
+        </ErrorBoundary>
+    );
+}
