@@ -1,7 +1,6 @@
-
 import React, { useState } from 'react';
 import { Customer, Order, Product, GlobalSettings } from '../types';
-import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle, ExternalLink, Trash2, StickyNote, Award, Crown, Sprout, Skull, History } from 'lucide-react';
+import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle, ExternalLink, Trash2, StickyNote, Award, Crown, Sprout, Skull, History, Plus, UserPlus } from 'lucide-react';
 
 interface CRMProps {
   customers: Customer[];
@@ -10,13 +9,27 @@ interface CRMProps {
   settings: GlobalSettings;
   onUpdateCustomer: (c: Customer) => void;
   onDeleteCustomer?: (id: string) => void;
+  onAddCustomer?: (c: Customer) => void;
 }
 
-export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings, onUpdateCustomer, onDeleteCustomer }) => {
+// Generate ID Helper
+const generateId = () => Math.random().toString(36).substring(2, 9);
+
+export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings, onUpdateCustomer, onDeleteCustomer, onAddCustomer }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Customer>>({});
+  
+  // Add Customer Modal State
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({
+      lineName: '',
+      nickname: '',
+      realName: '',
+      phone: '',
+      note: ''
+  });
 
   const filteredCustomers = customers.filter(c => 
     !c.isStock && ( // Exclude stock from CRM list
@@ -88,24 +101,57 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
 
   const toggleExpand = (id: string) => {
       setExpandedId(expandedId === id ? null : id);
-  }
+  };
+
+  const handleCreateCustomer = () => {
+      if(!newCustomer.lineName) {
+          alert('請輸入 LINE 名稱');
+          return;
+      }
+      
+      if(onAddCustomer) {
+          onAddCustomer({
+              id: generateId(),
+              lineName: newCustomer.lineName,
+              nickname: newCustomer.nickname,
+              realName: newCustomer.realName,
+              phone: newCustomer.phone,
+              note: newCustomer.note,
+              totalSpent: 0,
+              sessionCount: 0,
+              isBlacklisted: false
+          });
+          setIsAddOpen(false);
+          setNewCustomer({lineName: '', nickname: '', realName: '', phone: '', note: ''});
+      }
+  };
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-stone-100">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow-sm border border-stone-100 gap-4">
         <h2 className="text-xl font-bold text-stone-800 flex items-center gap-2">
           <User className="text-blue-500" />
           顧客關係管理 (CRM)
         </h2>
-        <div className="relative w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-4 h-4" />
-          <input 
-            type="text" 
-            placeholder="搜尋姓名、暱稱..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+        
+        <div className="flex gap-2 w-full md:w-auto">
+            <div className="relative flex-1 md:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-4 h-4" />
+                <input 
+                    type="text" 
+                    placeholder="搜尋姓名、暱稱..." 
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+            </div>
+            
+            <button 
+                onClick={() => setIsAddOpen(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-1 shadow-sm whitespace-nowrap"
+            >
+                <Plus size={16} /> 新增顧客
+            </button>
         </div>
       </div>
 
@@ -376,6 +422,77 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
           );
         })}
       </div>
+
+      {/* Add Customer Modal */}
+      {isAddOpen && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in-95">
+                  <div className="p-4 border-b bg-stone-50 flex justify-between items-center">
+                      <h3 className="font-bold text-stone-800 flex items-center gap-2"><UserPlus size={20} className="text-blue-500"/> 新增顧客資料</h3>
+                      <button onClick={() => setIsAddOpen(false)}><X size={20} className="text-stone-400"/></button>
+                  </div>
+                  <div className="p-5 space-y-4">
+                      <div>
+                          <label className="block text-sm font-bold text-stone-700 mb-1">LINE 名稱 (必填)</label>
+                          <input 
+                             type="text" 
+                             className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                             placeholder="例如: Amy Chen"
+                             value={newCustomer.lineName}
+                             onChange={e => setNewCustomer({...newCustomer, lineName: e.target.value})}
+                             autoFocus
+                          />
+                      </div>
+                      <div>
+                          <label className="block text-sm font-medium text-stone-600 mb-1">社群暱稱</label>
+                          <input 
+                             type="text" 
+                             className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                             placeholder="例如: Amy +1"
+                             value={newCustomer.nickname}
+                             onChange={e => setNewCustomer({...newCustomer, nickname: e.target.value})}
+                          />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                          <div>
+                              <label className="block text-sm font-medium text-stone-600 mb-1">真實姓名</label>
+                              <input 
+                                 type="text" 
+                                 className="w-full border rounded-lg px-3 py-2 text-sm"
+                                 value={newCustomer.realName}
+                                 onChange={e => setNewCustomer({...newCustomer, realName: e.target.value})}
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-sm font-medium text-stone-600 mb-1">電話</label>
+                              <input 
+                                 type="text" 
+                                 className="w-full border rounded-lg px-3 py-2 text-sm"
+                                 value={newCustomer.phone}
+                                 onChange={e => setNewCustomer({...newCustomer, phone: e.target.value})}
+                              />
+                          </div>
+                      </div>
+                      <div>
+                          <label className="block text-sm font-medium text-stone-600 mb-1">備註 / 喜好</label>
+                          <textarea 
+                             className="w-full border rounded-lg px-3 py-2 text-sm h-20 resize-none"
+                             placeholder="例如: 喜歡粉紅色、過敏體質..."
+                             value={newCustomer.note}
+                             onChange={e => setNewCustomer({...newCustomer, note: e.target.value})}
+                          />
+                      </div>
+                      
+                      <button 
+                        onClick={handleCreateCustomer}
+                        className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow-md hover:bg-blue-700 transition-colors mt-2"
+                      >
+                          確認新增
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

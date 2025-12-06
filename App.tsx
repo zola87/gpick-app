@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, ClipboardList, CloudLightning } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
@@ -8,7 +9,7 @@ import { CRM } from './components/CRM';
 import { Settings } from './components/Settings';
 import { Inventory } from './components/Inventory';
 import { TodoList } from './components/TodoList';
-import { Product, Order, Customer, GlobalSettings, TodoItem } from './types';
+import { Product, Order, Customer, GlobalSettings, TodoItem, SalesReport } from './types';
 import * as fbService from './services/firebaseService';
 
 // Safe ID generator for Init Data
@@ -67,7 +68,8 @@ const INITIAL_SETTINGS: GlobalSettings = {
   customerLevels: {
       vip: 10000,
       vvip: 30000
-  }
+  },
+  currentAiAnalysis: ''
 };
 
 function App() {
@@ -81,6 +83,7 @@ function App() {
   const [orders, setOrders] = useState<Order[]>(() => JSON.parse(localStorage.getItem('gpick_orders') || JSON.stringify(INITIAL_ORDERS)));
   const [settings, setSettings] = useState<GlobalSettings>(() => JSON.parse(localStorage.getItem('gpick_settings') || JSON.stringify(INITIAL_SETTINGS)));
   const [todos, setTodos] = useState<TodoItem[]>(() => JSON.parse(localStorage.getItem('gpick_todos') || '[]'));
+  const [reports, setReports] = useState<SalesReport[]>(() => JSON.parse(localStorage.getItem('gpick_reports') || '[]'));
 
   // Cloud Mode Flag
   const isCloud = settings.useCloudSync && settings.firebaseConfig;
@@ -91,6 +94,7 @@ function App() {
     let unsubCust = () => {};
     let unsubOrd = () => {};
     let unsubTodo = () => {};
+    let unsubReports = () => {};
     let unsubSettings = () => {};
 
     if (isCloud && settings.firebaseConfig) {
@@ -104,6 +108,7 @@ function App() {
             unsubCust = fbService.subscribeToCollection('customers', (data) => setCustomers(data));
             unsubOrd = fbService.subscribeToCollection('orders', (data) => setOrders(data));
             unsubTodo = fbService.subscribeToCollection('todos', (data) => setTodos(data));
+            unsubReports = fbService.subscribeToCollection('reports', (data) => setReports(data));
             
             // Sync Global Settings Rules (but keep local config)
             unsubSettings = fbService.subscribeToSettings((cloudRules) => {
@@ -124,6 +129,7 @@ function App() {
         unsubCust();
         unsubOrd();
         unsubTodo();
+        unsubReports();
         unsubSettings();
     };
   }, [isCloud, settings.firebaseConfig]); // Re-run if cloud mode toggled or config changed
@@ -135,6 +141,7 @@ function App() {
   useEffect(() => { localStorage.setItem('gpick_orders', JSON.stringify(orders)); }, [orders]);
   useEffect(() => { localStorage.setItem('gpick_settings', JSON.stringify(settings)); }, [settings]);
   useEffect(() => { localStorage.setItem('gpick_todos', JSON.stringify(todos)); }, [todos]);
+  useEffect(() => { localStorage.setItem('gpick_reports', JSON.stringify(reports)); }, [reports]);
 
   // Ensure "Stock" customer always exists
   useEffect(() => {
@@ -220,6 +227,11 @@ function App() {
   }
 
   // CUSTOMER Handlers
+  const handleAddCustomer = (newCustomer: Customer) => {
+      if (isCloud) fbService.addDocument('customers', newCustomer);
+      else setCustomers(prev => [...prev, newCustomer]);
+  };
+
   const handleUpdateCustomer = (updatedCustomer: Customer) => {
     if (isCloud) fbService.updateDocument('customers', updatedCustomer);
     else setCustomers(prev => prev.map(c => c.id === updatedCustomer.id ? updatedCustomer : c));
@@ -246,18 +258,48 @@ function App() {
     // Logic: Update isArchived = true for all orders except stock
     const activeOrders = orders.filter(o => !o.isArchived && o.customerId !== stockCustomerId);
     
-    // 1. Calculate stats for this session to update customer levels
+    if (activeOrders.length === 0) {
+        alert("沒有可封存的訂單。");
+        return;
+    }
+
+    // 1. Calculate stats for this session
     const sessionStats = new Map<string, number>(); // customerId -> spent amount in this session
+    let sessionRevenue = 0;
+    let sessionCost = 0;
     
     activeOrders.forEach(o => {
         const p = products.find(prod => prod.id === o.productId);
         if(p) {
+            const revenue = p.priceTWD * o.quantity;
+            const cost = p.priceJPY * settings.jpyExchangeRate * o.quantity;
+            
             const current = sessionStats.get(o.customerId) || 0;
-            sessionStats.set(o.customerId, current + (p.priceTWD * o.quantity));
+            sessionStats.set(o.customerId, current + revenue);
+            
+            sessionRevenue += revenue;
+            sessionCost += cost;
         }
     });
 
+    // 2. Create Sales Report
+    const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const newReport: SalesReport = {
+        id: safeId(),
+        date: todayStr,
+        name: `${todayStr} 連線`,
+        totalRevenue: sessionRevenue,
+        totalProfit: sessionRevenue - sessionCost,
+        totalItems: activeOrders.reduce((sum, o) => sum + o.quantity, 0),
+        exchangeRate: settings.jpyExchangeRate,
+        aiAnalysis: settings.currentAiAnalysis || '', // Save the draft analysis permanently
+        timestamp: Date.now()
+    };
+
     if (isCloud) {
+        // Save Report
+        fbService.addDocument('reports', newReport);
+
         // Update Customer Stats
         sessionStats.forEach((spent, custId) => {
             const cust = customers.find(c => c.id === custId);
@@ -272,7 +314,14 @@ function App() {
         activeOrders.forEach(o => {
             fbService.updateDocument('orders', { ...o, isArchived: true });
         });
+
+        // Clear Analysis Draft in Settings
+        fbService.saveSettingsToCloud({ ...settings, currentAiAnalysis: '' });
+
     } else {
+        // Save Report Locally
+        setReports(prev => [newReport, ...prev]);
+
         // Update Customer Stats Locally
         setCustomers(prev => prev.map(c => {
             if(sessionStats.has(c.id)) {
@@ -291,8 +340,11 @@ function App() {
             if (o.isArchived) return o;
             return { ...o, isArchived: true };
         }));
+
+        // Clear Analysis Draft Locally
+        setSettings(prev => ({ ...prev, currentAiAnalysis: '' }));
     }
-    alert('已成功封存舊訂單！\n有消費的顧客之「累積消費」與「跟團次數」已更新。');
+    alert('✅ 連線已結算並封存！\n\n1. 營運報表已產生 (含AI分析)\n2. 顧客等級已更新\n3. 訂單已移入歷史區');
   };
 
   // TODO Handlers
@@ -350,6 +402,8 @@ function App() {
       if (data.orders) setOrders(JSON.parse(data.orders));
       if (data.settings) setSettings(JSON.parse(data.settings));
       if (data.todos) setTodos(JSON.parse(data.todos));
+      // Supports importing reports if present
+      if (data.reports) setReports(JSON.parse(data.reports));
       alert("資料還原成功 (單機模式)！");
   };
 
@@ -495,7 +549,14 @@ function App() {
       <main className="flex-1 p-4 md:p-8 overflow-y-auto min-h-full bg-stone-50 z-0">
         <div className="max-w-7xl mx-auto min-h-full md:h-full pb-20 md:pb-0">
           {activeTab === 'dashboard' && (
-            <Dashboard products={products} orders={orders} customers={customers} settings={settings} />
+            <Dashboard 
+                products={products} 
+                orders={orders} 
+                customers={customers} 
+                settings={settings}
+                reports={reports} // Pass reports for history view
+                onUpdateSettings={handleSaveSettings} // Allow dashboard to save analysis
+            />
           )}
           {activeTab === 'crm' && (
              <CRM 
@@ -505,6 +566,7 @@ function App() {
                 settings={settings}
                 onUpdateCustomer={handleUpdateCustomer} 
                 onDeleteCustomer={handleDeleteCustomer}
+                onAddCustomer={handleAddCustomer}
              />
           )}
           {activeTab === 'live' && (

@@ -31,6 +31,9 @@ export interface GlobalSettings {
       vip: number;
       vvip: number;
   };
+
+  // Analysis Draft
+  currentAiAnalysis?: string; // Persistent draft for current session
 }
 
 export interface Product {
@@ -95,4 +98,16 @@ export interface TodoItem {
   category: 'WISH' | 'STORE' | 'PERSONAL';
   isCompleted: boolean;
   createdAt: number;
+}
+
+export interface SalesReport {
+  id: string;
+  date: string; // ISO Date String of archive time
+  name: string; // "2023-10 連線"
+  totalRevenue: number;
+  totalProfit: number;
+  totalItems: number;
+  exchangeRate: number;
+  aiAnalysis: string; // The full AI text
+  timestamp: number;
 }

@@ -1,7 +1,7 @@
 
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, Firestore, writeBatch } from 'firebase/firestore';
-import { FirebaseConfig, Product, Customer, Order, TodoItem, GlobalSettings } from '../types';
+import { FirebaseConfig, Product, Customer, Order, TodoItem, GlobalSettings, SalesReport } from '../types';
 
 let app: FirebaseApp | undefined;
 let db: Firestore | undefined;
@@ -12,6 +12,7 @@ const COLL_CUSTOMERS = 'customers';
 const COLL_ORDERS = 'orders';
 const COLL_TODOS = 'todos';
 const COLL_SETTINGS = 'settings';
+const COLL_REPORTS = 'reports';
 
 export const initFirebase = (config: FirebaseConfig) => {
   if (!app) {
