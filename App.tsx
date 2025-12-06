@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, Component, ErrorInfo } from 'react';
+import React, { useState, useEffect, ErrorInfo } from 'react';
 import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, ClipboardList, CloudLightning, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { LiveSession } from './components/LiveSession';
@@ -82,7 +81,7 @@ interface ErrorBoundaryState {
 }
 
 // Error Boundary Component
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -98,13 +97,17 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
   handleEmergencyReset = () => {
       // Clear cloud settings to force local mode
-      const currentSettings = JSON.parse(localStorage.getItem('gpick_settings') || '{}');
-      const resetSettings = {
-          ...currentSettings,
-          useCloudSync: false,
-          firebaseConfig: undefined
-      };
-      localStorage.setItem('gpick_settings', JSON.stringify(resetSettings));
+      try {
+          const currentSettings = JSON.parse(localStorage.getItem('gpick_settings') || '{}');
+          const resetSettings = {
+              ...currentSettings,
+              useCloudSync: false,
+              firebaseConfig: undefined
+          };
+          localStorage.setItem('gpick_settings', JSON.stringify(resetSettings));
+      } catch (e) {
+          console.error("Reset settings failed", e);
+      }
       window.location.reload();
   };
 
@@ -142,6 +145,11 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
+interface ErrorBoundaryState {
+    hasError: boolean;
+    error: Error | null;
+}
+
 function MainApp() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'live' | 'shopping' | 'billing' | 'crm' | 'settings' | 'inventory' | 'todo'>('live');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -157,6 +165,16 @@ function MainApp() {
 
   // Cloud Mode Flag
   const isCloud = settings.useCloudSync && settings.firebaseConfig;
+
+  // Helper for Safe Local Storage Saving (Prevents QuotaExceededError crash)
+  const safeSave = (key: string, value: any) => {
+      try {
+          localStorage.setItem(key, JSON.stringify(value));
+      } catch (e) {
+          // If quota is exceeded, just log warning. The app continues working in memory/cloud.
+          console.warn(`LocalStorage Save Failed (${key}):`, e);
+      }
+  };
 
   // --- EFFECT: CLOUD SYNC ---
   useEffect(() => {
@@ -206,12 +224,13 @@ function MainApp() {
 
   // --- EFFECT: LOCAL STORAGE SYNC (Fallback & Cache) ---
   // Always save to local storage as backup/cache, even in cloud mode
-  useEffect(() => { localStorage.setItem('gpick_products', JSON.stringify(products)); }, [products]);
-  useEffect(() => { localStorage.setItem('gpick_customers', JSON.stringify(customers)); }, [customers]);
-  useEffect(() => { localStorage.setItem('gpick_orders', JSON.stringify(orders)); }, [orders]);
-  useEffect(() => { localStorage.setItem('gpick_settings', JSON.stringify(settings)); }, [settings]);
-  useEffect(() => { localStorage.setItem('gpick_todos', JSON.stringify(todos)); }, [todos]);
-  useEffect(() => { localStorage.setItem('gpick_reports', JSON.stringify(reports)); }, [reports]);
+  // Use safeSave to prevent QuotaExceededError crashes
+  useEffect(() => { safeSave('gpick_products', products); }, [products]);
+  useEffect(() => { safeSave('gpick_customers', customers); }, [customers]);
+  useEffect(() => { safeSave('gpick_orders', orders); }, [orders]);
+  useEffect(() => { safeSave('gpick_settings', settings); }, [settings]);
+  useEffect(() => { safeSave('gpick_todos', todos); }, [todos]);
+  useEffect(() => { safeSave('gpick_reports', reports); }, [reports]);
 
   // Ensure "Stock" customer always exists
   useEffect(() => {
