@@ -32,7 +32,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
 
   // Order Editing State
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
-  const [editOrderForm, setEditOrderForm] = useState<{variant: string, quantity: number}>({variant: '', quantity: 1});
+  const [editOrderForm, setEditOrderForm] = useState<{variant: string, quantityBought: number}>({variant: '', quantityBought: 1});
 
   // Find the Stock Customer ID (Used for display filtering)
   const stockCustomer = customers.find(c => c.isStock);
@@ -49,7 +49,9 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
       .filter(c => !c.isStock) // Exclude stock user
       .filter(c => c.lineName.toLowerCase().includes(searchTerm.toLowerCase()))
       .map(customer => {
-        const myOrders = activeOrders.filter(o => o.customerId === customer.id);
+        // Filter to only items that have actually been BOUGHT
+        const myOrders = activeOrders.filter(o => o.customerId === customer.id && (o.quantityBought || 0) > 0);
+        
         if (myOrders.length === 0) return null;
         
         const isFullyPacked = myOrders.every(o => o.status === 'PACKED' || o.status === 'SHIPPED');
@@ -68,7 +70,8 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
   const productTotals = useMemo(() => {
     const map = new Map<string, { product: Product; qty: number; variants: Record<string, number> }>();
     
-    activeOrders.forEach(order => {
+    // Only count bought items
+    activeOrders.filter(o => (o.quantityBought || 0) > 0).forEach(order => {
        const product = products.find(p => p.id === order.productId);
        if (!product) return;
        
@@ -76,10 +79,13 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
        if (totalsSearchTerm && !product.name.toLowerCase().includes(totalsSearchTerm.toLowerCase())) return;
 
        const existing = map.get(product.id) || { product, qty: 0, variants: {} };
-       existing.qty += order.quantity;
+       
+       // Count actual bought quantity
+       const bought = order.quantityBought || 0;
+       existing.qty += bought;
        
        const v = order.variant || 'default';
-       existing.variants[v] = (existing.variants[v] || 0) + order.quantity;
+       existing.variants[v] = (existing.variants[v] || 0) + bought;
        
        map.set(product.id, existing);
     });
@@ -134,7 +140,6 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
               updates.forEach(o => onUpdateOrder(o));
           }
           
-          // CRITICAL FEEDBACK
           alert(`成功！已將 ${updates.length} 件商品移入「現貨/庫存」分頁。`);
       }
   };
@@ -185,7 +190,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
       setEditingOrderId(order.id);
       setEditOrderForm({
           variant: order.variant || '',
-          quantity: order.quantity
+          quantityBought: order.quantityBought || 0
       });
   };
 
@@ -193,7 +198,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
       onUpdateOrder({
           ...order,
           variant: editOrderForm.variant,
-          quantity: Number(editOrderForm.quantity)
+          quantityBought: Number(editOrderForm.quantityBought)
       });
       setEditingOrderId(null);
   };
@@ -249,6 +254,11 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                     onChange={e => setSearchTerm(e.target.value)}
                 />
             </div>
+            
+            <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-sm text-blue-800 flex items-start gap-2">
+                 <Package size={16} className="mt-0.5 flex-shrink-0" />
+                 <span>此頁面僅顯示「已買到」的商品。若需修改客人喊單內容，請前往「顧客管理 (CRM)」頁面。</span>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {customerPackages.map((pkg) => (
@@ -292,8 +302,8 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                                                     <input 
                                                         type="number" min="1"
                                                         className="border rounded text-sm py-1 px-1 w-16"
-                                                        value={editOrderForm.quantity}
-                                                        onChange={e => setEditOrderForm({...editOrderForm, quantity: Number(e.target.value)})}
+                                                        value={editOrderForm.quantityBought}
+                                                        onChange={e => setEditOrderForm({...editOrderForm, quantityBought: Number(e.target.value)})}
                                                     />
                                                     <button type="button" onClick={() => saveEditing(order)} className="text-green-600 hover:bg-green-100 p-1 rounded"><Check size={16}/></button>
                                                     <button type="button" onClick={() => setEditingOrderId(null)} className="text-stone-400 hover:bg-stone-100 p-1 rounded"><XCircle size={16}/></button>
@@ -309,7 +319,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                                                         </p>
                                                         <p className="text-xs text-stone-500">
                                                             {order.variant && <span className="bg-stone-100 px-1 rounded mr-1 font-bold text-stone-600">{order.variant}</span>}
-                                                            x {order.quantity}
+                                                            x <span className="font-bold text-lg text-blue-600">{order.quantityBought}</span>
                                                         </p>
                                                     </div>
                                                 </div>
@@ -324,14 +334,6 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                                                         title="編輯"
                                                     >
                                                         <Edit2 size={16} />
-                                                    </button>
-                                                    <button 
-                                                        type="button"
-                                                        onClick={(e) => handleRealDeleteOrder(e, order)}
-                                                        className="text-stone-300 hover:text-red-500 p-1"
-                                                        title="刪除錯誤訂單 (Key錯用)"
-                                                    >
-                                                        <Trash2 size={16} />
                                                     </button>
                                                 </div>
                                             )}
@@ -364,7 +366,7 @@ export const Inventory: React.FC<InventoryProps> = ({ customers, orders, product
                     <thead className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wider">
                         <tr>
                             <th className="p-4 font-medium">商品名稱</th>
-                            <th className="p-4 font-medium text-right">總數量</th>
+                            <th className="p-4 font-medium text-right">已買到總數</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100">

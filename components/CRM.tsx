@@ -1,6 +1,7 @@
+
 import React, { useState } from 'react';
 import { Customer, Order, Product, GlobalSettings } from '../types';
-import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle, ExternalLink, Trash2, StickyNote, Award, Crown, Sprout, Skull, History, Plus, UserPlus } from 'lucide-react';
+import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle, ExternalLink, Trash2, StickyNote, Award, Crown, Sprout, Skull, History, Plus, UserPlus, Package, ShoppingCart, Check, CreditCard, AlignLeft } from 'lucide-react';
 
 interface CRMProps {
   customers: Customer[];
@@ -10,17 +11,24 @@ interface CRMProps {
   onUpdateCustomer: (c: Customer) => void;
   onDeleteCustomer?: (id: string) => void;
   onAddCustomer?: (c: Customer) => void;
+  // New props for Order Management
+  onUpdateOrder?: (o: Order) => void;
+  onDeleteOrder?: (id: string) => void;
 }
 
 // Generate ID Helper
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
-export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings, onUpdateCustomer, onDeleteCustomer, onAddCustomer }) => {
+export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings, onUpdateCustomer, onDeleteCustomer, onAddCustomer, onUpdateOrder, onDeleteOrder }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Customer>>({});
   
+  // Order Editing State
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [editOrderData, setEditOrderData] = useState<{quantity: number, quantityBought: number}>({quantity: 0, quantityBought: 0});
+
   // Add Customer Modal State
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({
@@ -126,6 +134,32 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
       }
   };
 
+  // --- Order Management Handlers ---
+  const startEditingOrder = (order: Order) => {
+      setEditingOrderId(order.id);
+      setEditOrderData({
+          quantity: order.quantity,
+          quantityBought: order.quantityBought || 0
+      });
+  };
+
+  const saveEditingOrder = (order: Order) => {
+      if(onUpdateOrder) {
+          onUpdateOrder({
+              ...order,
+              quantity: Number(editOrderData.quantity),
+              quantityBought: Number(editOrderData.quantityBought)
+          });
+          setEditingOrderId(null);
+      }
+  };
+
+  const handleDeleteOrderAction = (orderId: string) => {
+      if(window.confirm("確定要刪除此訂單嗎？")) {
+          onDeleteOrder && onDeleteOrder(orderId);
+      }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow-sm border border-stone-100 gap-4">
@@ -216,7 +250,7 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
                   </div>
                 </div>
                 <div className="flex gap-2 items-center flex-shrink-0 ml-2">
-                  {customer.chatUrl && (
+                  {customer.chatUrl && !isEditing && (
                       <a href={customer.chatUrl} target="_blank" rel="noreferrer" className="text-xs bg-[#06C755] text-white px-2 py-1 rounded-full flex items-center gap-1 hover:bg-[#05b34c]">
                           <MessageCircle size={12}/>
                       </a>
@@ -248,6 +282,76 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
                         </div>
                     </div>
 
+                    {/* Order Management Section */}
+                    {onUpdateOrder && onDeleteOrder && (
+                        <div className="mt-4 mb-4 border border-blue-100 rounded-lg overflow-hidden">
+                            <div className="bg-blue-50 px-3 py-2 border-b border-blue-100 flex items-center gap-2">
+                                <Package size={14} className="text-blue-600"/>
+                                <h4 className="text-xs font-bold text-blue-800">📋 訂單管理 (本場連線)</h4>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto bg-white">
+                                {orders.filter(o => o.customerId === customer.id && !o.isArchived).length === 0 ? (
+                                    <div className="p-4 text-center text-xs text-stone-400">尚無本場訂單</div>
+                                ) : (
+                                    orders.filter(o => o.customerId === customer.id && !o.isArchived).map(order => {
+                                        const prod = products.find(p => p.id === order.productId);
+                                        const isOrderEditing = editingOrderId === order.id;
+
+                                        return (
+                                            <div key={order.id} className="p-2 border-b border-stone-50 last:border-0 hover:bg-stone-50 flex justify-between items-center group">
+                                                <div className="flex-1 min-w-0 pr-2">
+                                                    <div className="font-bold text-stone-700 truncate text-xs">{prod?.name}</div>
+                                                    <div className="text-[10px] text-stone-500">
+                                                        {order.variant && <span className="bg-stone-100 px-1 rounded mr-1">{order.variant}</span>}
+                                                        {isOrderEditing ? (
+                                                            <div className="flex items-center gap-2 mt-1">
+                                                                <label className="flex items-center gap-1 text-pink-500 font-bold">
+                                                                    喊: <input 
+                                                                        type="number" min="1"
+                                                                        className="w-10 border rounded px-1 text-center bg-white"
+                                                                        value={editOrderData.quantity}
+                                                                        onChange={e => setEditOrderData({...editOrderData, quantity: Number(e.target.value)})}
+                                                                    />
+                                                                </label>
+                                                                <label className="flex items-center gap-1 text-green-600 font-bold">
+                                                                    買: <input 
+                                                                        type="number" min="0"
+                                                                        className="w-10 border rounded px-1 text-center bg-white"
+                                                                        value={editOrderData.quantityBought}
+                                                                        onChange={e => setEditOrderData({...editOrderData, quantityBought: Number(e.target.value)})}
+                                                                    />
+                                                                </label>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="mt-0.5 block">
+                                                                喊: <span className="text-pink-500 font-bold">{order.quantity}</span> / 
+                                                                買: <span className="text-green-600 font-bold">{order.quantityBought || 0}</span>
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="flex items-center gap-1">
+                                                    {isOrderEditing ? (
+                                                        <>
+                                                            <button onClick={() => saveEditingOrder(order)} className="p-1 bg-green-100 text-green-700 rounded hover:bg-green-200"><Save size={14}/></button>
+                                                            <button onClick={() => setEditingOrderId(null)} className="p-1 bg-stone-100 text-stone-500 rounded hover:bg-stone-200"><X size={14}/></button>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <button onClick={() => startEditingOrder(order)} className="p-1 text-stone-400 hover:text-blue-500 hover:bg-blue-50 rounded"><Edit2 size={14}/></button>
+                                                            <button onClick={() => handleDeleteOrderAction(order.id)} className="p-1 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded"><Trash2 size={14}/></button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex justify-end gap-2 mb-2">
                         {isEditing ? (
                             <>
@@ -263,98 +367,110 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
                             <button onClick={() => setEditingId(null)} className="p-1.5 bg-stone-100 text-stone-600 rounded-lg hover:bg-stone-200"><X size={16} /></button>
                             </>
                         ) : (
-                            <button onClick={() => startEdit(customer)} className="flex items-center gap-1 px-2 py-1 bg-white border border-stone-200 text-stone-500 rounded text-xs hover:text-blue-600 hover:border-blue-200">
+                            <button onClick={() => startEdit(customer)} className="flex items-center gap-1 px-2 py-1 bg-white border border-stone-200 text-stone-500 rounded text-xs hover:text-blue-600 hover:border-blue-200 transition-colors">
                                 <Edit2 size={12} /> 編輯資料
                             </button>
                         )}
                     </div>
                     
-                    {/* Chat Link Field */}
-                    <div className="flex items-center gap-2 text-stone-600">
-                    <MessageCircle size={14} className="text-stone-400" />
-                    <span className="w-16 text-stone-400">LINE連結:</span>
-                    {isEditing ? (
-                        <input 
-                          className="flex-1 border rounded px-1 text-xs" 
-                          placeholder="https://..." 
-                          value={editForm.chatUrl || ''} 
-                          onChange={e => setEditForm({...editForm, chatUrl: e.target.value})} 
-                        />
-                    ) : (
-                        customer.chatUrl ? 
-                        <a href={customer.chatUrl} target="_blank" className="text-blue-500 flex items-center gap-1 hover:underline truncate w-32">
-                            連結 <ExternalLink size={10}/>
-                        </a> : <span className="text-stone-300">-</span>
-                    )}
+                    {/* PRIMARY INFO (Always Visible) */}
+                    <div className="space-y-3 pt-2">
+                        {/* 1. Chat Link */}
+                        <div className="flex items-center gap-2 text-stone-600">
+                            <div className="w-6 flex justify-center"><MessageCircle size={14} className="text-stone-400" /></div>
+                            {isEditing ? (
+                                <input 
+                                className="flex-1 border rounded px-2 py-1 text-sm bg-white focus:ring-1 focus:ring-blue-500" 
+                                placeholder="貼上 LINE 聊天室連結 (https://...)" 
+                                value={editForm.chatUrl || ''} 
+                                onChange={e => setEditForm({...editForm, chatUrl: e.target.value})} 
+                                />
+                            ) : (
+                                customer.chatUrl ? 
+                                <a href={customer.chatUrl} target="_blank" rel="noreferrer" className="text-blue-600 flex items-center gap-1 hover:underline text-sm font-medium">
+                                    開啟 LINE 聊天室 <ExternalLink size={12}/>
+                                </a> : <span className="text-stone-300 text-xs italic">未設定連結</span>
+                            )}
+                        </div>
+
+                        {/* 2. Note */}
+                        <div className="flex items-start gap-2 text-stone-600">
+                            <div className="w-6 flex justify-center mt-1"><StickyNote size={14} className="text-stone-400" /></div>
+                            {isEditing ? (
+                                <textarea 
+                                    className="flex-1 border rounded px-2 py-1 h-20 text-sm bg-white focus:ring-1 focus:ring-blue-500" 
+                                    placeholder="備註 / 喜好 / 黑名單原因..."
+                                    value={editForm.note || ''} 
+                                    onChange={e => setEditForm({...editForm, note: e.target.value})} 
+                                />
+                            ) : (
+                                <p className="flex-1 text-stone-700 bg-amber-50/50 border border-amber-100 p-2 rounded text-sm whitespace-pre-line min-h-[40px]">
+                                    {customer.note || <span className="text-stone-300 text-xs italic">無備註</span>}
+                                </p>
+                            )}
+                        </div>
                     </div>
 
-                    <div className="flex items-center gap-2 text-stone-600">
-                    <User size={14} className="text-stone-400" />
-                    <span className="w-16 text-stone-400">真實姓名:</span>
+                    {/* SECONDARY INFO (Collapsible) */}
                     {isEditing ? (
-                        <input className="flex-1 border rounded px-1" value={editForm.realName || ''} onChange={e => setEditForm({...editForm, realName: e.target.value})} />
+                        <div className="border-t border-stone-100 pt-4 mt-2 space-y-3 animate-in fade-in bg-stone-50/50 p-3 rounded-lg">
+                            <h4 className="text-xs font-bold text-stone-400 mb-2">基本資料編輯</h4>
+                            <div className="flex items-center gap-2 text-stone-600">
+                                <div className="w-6 flex justify-center"><User size={14} className="text-stone-400" /></div>
+                                <span className="text-xs text-stone-400 w-12">姓名:</span>
+                                <input className="flex-1 border rounded px-2 py-1 text-sm bg-white" value={editForm.realName || ''} onChange={e => setEditForm({...editForm, realName: e.target.value})} placeholder="真實姓名"/>
+                            </div>
+                            <div className="flex items-center gap-2 text-stone-600">
+                                <div className="w-6 flex justify-center"><Phone size={14} className="text-stone-400" /></div>
+                                <span className="text-xs text-stone-400 w-12">電話:</span>
+                                <input className="flex-1 border rounded px-2 py-1 text-sm bg-white" value={editForm.phone || ''} onChange={e => setEditForm({...editForm, phone: e.target.value})} placeholder="09xx-xxx-xxx"/>
+                            </div>
+                            <div className="flex items-center gap-2 text-stone-600">
+                                <div className="w-6 flex justify-center"><Calendar size={14} className="text-stone-400" /></div>
+                                <span className="text-xs text-stone-400 w-12">生日:</span>
+                                <input type="date" className="flex-1 border rounded px-2 py-1 text-sm bg-white" value={editForm.birthDate || ''} onChange={e => setEditForm({...editForm, birthDate: e.target.value})} />
+                            </div>
+                            <div className="flex items-start gap-2 text-stone-600">
+                                <div className="w-6 flex justify-center mt-1"><MapPin size={14} className="text-stone-400" /></div>
+                                <span className="text-xs text-stone-400 w-12 mt-1">地址:</span>
+                                <textarea className="flex-1 border rounded px-2 py-1 h-16 text-sm bg-white" value={editForm.address || ''} onChange={e => setEditForm({...editForm, address: e.target.value})} placeholder="寄送地址或店號"/>
+                            </div>
+                            <div className="flex items-center gap-2 text-stone-600">
+                                <div className="w-6 flex justify-center"><CreditCard size={14} className="text-stone-400" /></div>
+                                <span className="text-xs text-stone-400 w-12">帳號:</span>
+                                <input className="flex-1 border rounded px-2 py-1 text-sm bg-white" value={editForm.lastFiveDigits || ''} onChange={e => setEditForm({...editForm, lastFiveDigits: e.target.value})} placeholder="匯款後五碼"/>
+                            </div>
+                        </div>
                     ) : (
-                        <span className="font-medium">{customer.realName || '-'}</span>
+                        <details className="group border border-stone-200 rounded-lg bg-stone-50 overflow-hidden mt-3 transition-all">
+                            <summary className="p-3 text-xs font-bold text-stone-600 cursor-pointer flex items-center justify-between hover:bg-stone-100 select-none">
+                                <span className="flex items-center gap-2"><AlignLeft size={14}/> 詳細個資 (電話/地址/帳號)</span>
+                                <ChevronDown size={16} className="transition-transform duration-200 group-open:rotate-180 text-stone-400"/>
+                            </summary>
+                            <div className="p-4 space-y-3 bg-white border-t border-stone-200 text-sm">
+                                <div className="flex gap-2">
+                                    <span className="text-stone-400 w-16 flex-shrink-0">真實姓名:</span>
+                                    <span className="font-medium text-stone-800 select-all">{customer.realName || '-'}</span>
+                                </div>
+                                <div className="flex gap-2">
+                                    <span className="text-stone-400 w-16 flex-shrink-0">電話:</span>
+                                    <span className="font-medium text-stone-800 select-all">{customer.phone || '-'}</span>
+                                </div>
+                                <div className="flex gap-2">
+                                    <span className="text-stone-400 w-16 flex-shrink-0">生日:</span>
+                                    <span className="font-medium text-stone-800">{customer.birthDate || '-'}</span>
+                                </div>
+                                <div className="flex gap-2">
+                                    <span className="text-stone-400 w-16 flex-shrink-0">地址/店號:</span>
+                                    <span className="font-medium text-stone-800 break-all select-all">{customer.address || '-'}</span>
+                                </div>
+                                <div className="flex gap-2">
+                                    <span className="text-stone-400 w-16 flex-shrink-0">後五碼:</span>
+                                    <span className="font-medium text-stone-800 select-all">{customer.lastFiveDigits || '-'}</span>
+                                </div>
+                            </div>
+                        </details>
                     )}
-                    </div>
-
-                    <div className="flex items-center gap-2 text-stone-600">
-                    <Phone size={14} className="text-stone-400" />
-                    <span className="w-16 text-stone-400">電話:</span>
-                    {isEditing ? (
-                        <input className="flex-1 border rounded px-1" value={editForm.phone || ''} onChange={e => setEditForm({...editForm, phone: e.target.value})} />
-                    ) : (
-                        <span className="font-medium">{customer.phone || '-'}</span>
-                    )}
-                    </div>
-
-                    <div className="flex items-center gap-2 text-stone-600">
-                    <Calendar size={14} className="text-stone-400" />
-                    <span className="w-16 text-stone-400">生日:</span>
-                    {isEditing ? (
-                        <input type="date" className="flex-1 border rounded px-1" value={editForm.birthDate || ''} onChange={e => setEditForm({...editForm, birthDate: e.target.value})} />
-                    ) : (
-                        <span className="font-medium">{customer.birthDate || '-'}</span>
-                    )}
-                    </div>
-
-                    <div className="flex items-start gap-2 text-stone-600">
-                    <MapPin size={14} className="text-stone-400 mt-0.5" />
-                    <span className="w-16 text-stone-400 flex-shrink-0">地址/店號:</span>
-                    {isEditing ? (
-                        <textarea className="flex-1 border rounded px-1 h-16" value={editForm.address || ''} onChange={e => setEditForm({...editForm, address: e.target.value})} />
-                    ) : (
-                        <span className="font-medium break-all">{customer.address || '-'}</span>
-                    )}
-                    </div>
-                    
-                    <div className="flex items-center gap-2 text-stone-600">
-                    <span className="w-4"></span>
-                    <span className="w-16 text-stone-400">匯款後五碼:</span>
-                    {isEditing ? (
-                        <input className="flex-1 border rounded px-1" value={editForm.lastFiveDigits || ''} onChange={e => setEditForm({...editForm, lastFiveDigits: e.target.value})} />
-                    ) : (
-                        <span className="font-medium">{customer.lastFiveDigits || '-'}</span>
-                    )}
-                    </div>
-
-                    {/* Manual Note/Preferences */}
-                    <div className="flex items-start gap-2 text-stone-600 border-t border-stone-100 pt-3">
-                        <StickyNote size={14} className="text-stone-400 mt-0.5" />
-                        <span className="w-16 text-stone-400 flex-shrink-0">備註/喜好:</span>
-                        {isEditing ? (
-                            <textarea 
-                                className="flex-1 border rounded px-1 h-20 text-xs" 
-                                placeholder="手動輸入客人備註..."
-                                value={editForm.note || ''} 
-                                onChange={e => setEditForm({...editForm, note: e.target.value})} 
-                            />
-                        ) : (
-                             <p className="flex-1 text-stone-700 bg-stone-50 p-2 rounded text-xs whitespace-pre-line">
-                                 {customer.note || <span className="text-stone-300">無備註</span>}
-                             </p>
-                        )}
-                    </div>
 
                     {/* Analysis Section */}
                     <div className="pt-3 mt-3 border-t border-stone-100 bg-blue-50/50 p-2 rounded-lg">

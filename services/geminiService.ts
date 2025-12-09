@@ -14,7 +14,8 @@ const calculateStats = (products: Product[], orders: Order[], customers: Custome
     // 1. Calculate Stats per Product
     const productStats = products.map(p => {
         const pOrders = orders.filter(o => o.productId === p.id);
-        const qty = pOrders.reduce((sum, o) => sum + o.quantity, 0);
+        // CHANGED: Use quantityBought
+        const qty = pOrders.reduce((sum, o) => sum + (o.quantityBought || 0), 0);
         const revenue = p.priceTWD * qty;
         return { name: p.name, qty, revenue, category: p.category, brand: p.brand };
     }).filter(p => p.qty > 0);
@@ -24,9 +25,10 @@ const calculateStats = (products: Product[], orders: Order[], customers: Custome
         const cOrders = orders.filter(o => o.customerId === c.id);
         const spent = cOrders.reduce((sum, o) => {
             const p = products.find(prod => prod.id === o.productId);
-            return sum + (p ? p.priceTWD * o.quantity : 0);
+            // CHANGED: Use quantityBought
+            return sum + (p ? p.priceTWD * (o.quantityBought || 0) : 0);
         }, 0);
-        return { name: c.lineName, spent, count: cOrders.length };
+        return { name: c.lineName, spent, count: cOrders.filter(o => (o.quantityBought || 0) > 0).length };
     }).filter(c => c.spent > 0);
 
     const totalRevenue = productStats.reduce((sum, p) => sum + p.revenue, 0);
@@ -35,7 +37,7 @@ const calculateStats = (products: Product[], orders: Order[], customers: Custome
 
     return {
         totalRevenue,
-        totalOrders: orders.length,
+        totalOrders: orders.filter(o => (o.quantityBought || 0) > 0).length,
         activeCustomers: activeCustomerCount,
         averageOrderValue: aov,
         topSellingByQty: productStats.sort((a,b) => b.qty - a.qty).slice(0, 10),

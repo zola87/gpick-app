@@ -63,17 +63,11 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         const product = products.find(p => p.id === order.productId);
         if (!product) return null;
         
-        // Billing usually based on what is BOUGHT/PACKED, or just shouted?
-        // Usually billing is for what is secured. 
-        // For simplicity in this tool, if status is PENDING but quantityBought > 0, we bill quantityBought.
-        // If simply shouted (quantity), we might bill for all if pre-order. 
-        // Let's assume we bill for "quantity" unless it's strictly stock limited.
-        // But the previous logic was:
-        const billQty = order.status === 'BOUGHT' || order.status === 'PACKED' || order.status === 'SHIPPED' 
-          ? order.quantityBought || order.quantity 
-          : order.quantity; 
+        // CHANGED: Strictly use quantityBought for billing. 
+        // We only bill what is actually secured.
+        const billQty = order.quantityBought || 0;
 
-        if (billQty === 0) return null;
+        if (billQty <= 0) return null; // Skip items with 0 secured qty
 
         if (!order.isPaid) isFullyPaid = false;
 
@@ -88,6 +82,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         };
       }).filter(Boolean) as BillItem[];
 
+      // If no items were bought, don't generate a bill (even if they shouted)
       if (itemsDetail.length === 0) return null;
 
       const isFreeShipping = subtotal >= settings.freeShippingThreshold;
@@ -217,7 +212,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
         <div>
             <h2 className="text-2xl font-bold text-stone-800">對帳與結單</h2>
             <div className="text-sm text-stone-500 mt-1">
-            排序: 未付款優先 | 免運門檻: ${settings.freeShippingThreshold}
+            只顯示確實買到的商品 | 免運門檻: ${settings.freeShippingThreshold}
             </div>
         </div>
         <div className="relative w-full md:w-64">
@@ -261,7 +256,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
                 </ul>
                 <div className="border-t border-stone-100 pt-3 mt-3 space-y-1">
                   <div className="flex justify-between text-sm">
-                    <span>商品小計</span>
+                    <span>商品小計 (買到)</span>
                     <span>${bill.subtotal}</span>
                   </div>
                   <div className="flex justify-between text-sm text-stone-400">
@@ -394,7 +389,7 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
       {customerBills.length === 0 && (
         <div className="text-center py-20 text-stone-400">
           <DollarSign className="w-16 h-16 mx-auto mb-4 opacity-30" />
-          <p>尚無訂單資料可供結算 (如已封存請開始新連線)</p>
+          <p>尚無可結算的訂單 (須確實買到才會顯示)</p>
         </div>
       )}
     </div>

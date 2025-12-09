@@ -1,4 +1,5 @@
-import React, { useState, useEffect, ErrorInfo, Component } from 'react';
+
+import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, ClipboardList, CloudLightning, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { LiveSession } from './components/LiveSession';
@@ -72,7 +73,7 @@ const INITIAL_SETTINGS: GlobalSettings = {
 };
 
 interface ErrorBoundaryProps {
-    children: React.ReactNode;
+    children?: ReactNode;
 }
 
 interface ErrorBoundaryState {
@@ -82,7 +83,10 @@ interface ErrorBoundaryState {
 
 // Error Boundary Component
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = { hasError: false, error: null };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
@@ -648,6 +652,9 @@ function MainApp() {
                 onUpdateCustomer={handleUpdateCustomer} 
                 onDeleteCustomer={handleDeleteCustomer}
                 onAddCustomer={handleAddCustomer}
+                // CHANGED: Pass order management handlers
+                onUpdateOrder={handleUpdateOrder}
+                onDeleteOrder={handleDeleteOrder}
              />
           )}
           {activeTab === 'live' && (

@@ -21,19 +21,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
   // We only show stats for the CURRENT (Active) session
   const activeOrders = orders.filter(o => !o.isArchived);
 
-  // --- Current Stats ---
+  // --- Current Stats (Based on ACTUAL BOUGHT Quantity) ---
   const totalRevenue = activeOrders.reduce((acc, order) => {
     const product = products.find(p => p.id === order.productId);
-    return acc + (product ? product.priceTWD * order.quantity : 0);
+    // CHANGED: Use quantityBought instead of quantity
+    return acc + (product ? product.priceTWD * (order.quantityBought || 0) : 0);
   }, 0);
 
   const totalCostTWD = activeOrders.reduce((acc, order) => {
     const product = products.find(p => p.id === order.productId);
-    return acc + (product ? (product.priceJPY * settings.jpyExchangeRate * order.quantity) : 0);
+    // CHANGED: Use quantityBought instead of quantity
+    return acc + (product ? (product.priceJPY * settings.jpyExchangeRate * (order.quantityBought || 0)) : 0);
   }, 0);
 
   const netProfit = totalRevenue - totalCostTWD;
-  const totalItemsSold = activeOrders.reduce((acc, order) => acc + order.quantity, 0);
+  // CHANGED: Use quantityBought instead of quantity
+  const totalItemsSold = activeOrders.reduce((acc, order) => acc + (order.quantityBought || 0), 0);
 
   // --- Growth Calculation (vs Last Report) ---
   const lastReport = reports.length > 0 ? reports.sort((a,b) => b.timestamp - a.timestamp)[0] : null;
@@ -43,10 +46,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
   
   // --- Deep Dive Analysis Helpers ---
   
-  // 1. Product Performance
+  // 1. Product Performance (Based on Bought)
   const productPerformance = products.map(p => {
       const pOrders = activeOrders.filter(o => o.productId === p.id);
-      const qty = pOrders.reduce((sum, o) => sum + o.quantity, 0);
+      // CHANGED: Use quantityBought
+      const qty = pOrders.reduce((sum, o) => sum + (o.quantityBought || 0), 0);
       const revenue = p.priceTWD * qty;
       return { id: p.id, name: p.name, qty, revenue };
   }).filter(p => p.qty > 0);
@@ -54,14 +58,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
   const topProductsByRevenue = [...productPerformance].sort((a, b) => b.revenue - a.revenue).slice(0, 5);
   const topProductsByQty = [...productPerformance].sort((a, b) => b.qty - a.qty).slice(0, 5);
 
-  // 2. Customer Performance
+  // 2. Customer Performance (Based on Bought)
   const customerPerformance = customers.map(c => {
       const cOrders = activeOrders.filter(o => o.customerId === c.id);
       const spent = cOrders.reduce((sum, o) => {
           const p = products.find(prod => prod.id === o.productId);
-          return sum + (p ? p.priceTWD * o.quantity : 0);
+          // CHANGED: Use quantityBought
+          return sum + (p ? p.priceTWD * (o.quantityBought || 0) : 0);
       }, 0);
-      const count = cOrders.length; // orders count, not items
+      // Only count orders that actually have bought items
+      const count = cOrders.filter(o => (o.quantityBought || 0) > 0).length; 
       return { id: c.id, name: c.lineName, spent, count };
   }).filter(c => c.spent > 0).sort((a, b) => b.spent - a.spent);
 
@@ -72,10 +78,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
   const averageOrderValue = activeCustomerCount > 0 ? Math.round(totalRevenue / activeCustomerCount) : 0;
   const avgProfitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : '0';
 
-  // --- Category Analysis ---
+  // --- Category Analysis (Based on Bought) ---
   const categoryStats = products.reduce((acc: Record<string, number>, product) => {
     const productOrders = activeOrders.filter(o => o.productId === product.id);
-    const count = productOrders.reduce((sum, o) => sum + o.quantity, 0);
+    // CHANGED: Use quantityBought
+    const count = productOrders.reduce((sum, o) => sum + (o.quantityBought || 0), 0);
     if (count > 0) {
         const current = acc[product.category] || 0;
         acc[product.category] = current + count;
@@ -85,10 +92,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
 
   const sortedCategories = Object.entries(categoryStats).sort((a, b) => (b[1] as number) - (a[1] as number));
 
-  // --- Brand Analysis ---
+  // --- Brand Analysis (Based on Bought) ---
   const brandStats = products.reduce((acc: Record<string, number>, product) => {
     const productOrders = activeOrders.filter(o => o.productId === product.id);
-    const count = productOrders.reduce((sum, o) => sum + o.quantity, 0);
+    // CHANGED: Use quantityBought
+    const count = productOrders.reduce((sum, o) => sum + (o.quantityBought || 0), 0);
     if (count > 0) {
         const brand = product.brand || '未分類';
         const current = acc[brand] || 0;
@@ -131,7 +139,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
       // Include current potential session as the last point
       const dataPoints = [
           ...sortedReports, 
-          { name: '本場(預估)', totalRevenue, totalProfit: netProfit }
+          { name: '本場(即時)', totalRevenue, totalProfit: netProfit }
       ];
 
       const maxVal = Math.max(...dataPoints.map(d => d.totalRevenue)) * 1.1; // 10% buffer
@@ -215,7 +223,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
                 className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeView === 'current' ? 'bg-stone-800 text-white shadow-md' : 'text-stone-500 hover:text-stone-800 hover:bg-stone-100'}`}
             >
                 <LayoutDashboardIcon size={16} />
-                本場連線
+                本場連線 (實際買到)
             </button>
             <button 
                 onClick={() => setActiveView('history')}
@@ -233,7 +241,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
             {/* Metric Card 1 */}
             <div className="bg-white p-5 rounded-xl shadow-sm border border-stone-100 flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-2">
-                    <p className="text-xs font-bold text-stone-400 uppercase tracking-wider">本場總營收</p>
+                    <p className="text-xs font-bold text-stone-400 uppercase tracking-wider">本場總營收 (已購)</p>
                     <div className="p-1.5 bg-blue-50 rounded-md text-blue-600"><JapaneseYen size={16} /></div>
                 </div>
                 <div>
@@ -250,7 +258,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
             {/* Metric Card 2 */}
             <div className="bg-white p-5 rounded-xl shadow-sm border border-stone-100 flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-2">
-                    <p className="text-xs font-bold text-stone-400 uppercase tracking-wider">預估淨利 (Profit)</p>
+                    <p className="text-xs font-bold text-stone-400 uppercase tracking-wider">實際淨利 (Profit)</p>
                     <div className="p-1.5 bg-emerald-50 rounded-md text-emerald-600"><TrendingUp size={16} /></div>
                 </div>
                 <div>
@@ -267,19 +275,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
                 </div>
                 <div>
                     <h3 className="text-2xl font-bold text-stone-800">NT$ {averageOrderValue.toLocaleString()}</h3>
-                    <p className="text-xs text-stone-400 mt-1">活躍顧客: {activeCustomerCount} 人</p>
+                    <p className="text-xs text-stone-400 mt-1">有買到的顧客: {activeCustomerCount} 人</p>
                 </div>
             </div>
 
             {/* Metric Card 4 */}
             <div className="bg-white p-5 rounded-xl shadow-sm border border-stone-100 flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-2">
-                    <p className="text-xs font-bold text-stone-400 uppercase tracking-wider">總銷售件數</p>
+                    <p className="text-xs font-bold text-stone-400 uppercase tracking-wider">實際銷售件數</p>
                     <div className="p-1.5 bg-pink-50 rounded-md text-pink-600"><ShoppingCart size={16} /></div>
                 </div>
                 <div>
                     <h3 className="text-2xl font-bold text-stone-800">{totalItemsSold} <span className="text-sm font-normal text-stone-500">件</span></h3>
-                    <p className="text-xs text-stone-400 mt-1">商品數: {products.length} 款</p>
+                    <p className="text-xs text-stone-400 mt-1">只計算已買到商品</p>
                 </div>
             </div>
         </div>
@@ -289,7 +297,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
             {/* Product Performance Matrix */}
             <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-100">
                 <h3 className="font-bold text-stone-700 mb-4 flex items-center gap-2">
-                    <BarChart size={18} className="text-purple-500" /> 商品績效排行榜
+                    <BarChart size={18} className="text-purple-500" /> 商品績效排行榜 (依買到數)
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Revenue Leaders */}
@@ -348,7 +356,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
                                 </div>
                                 <div>
                                     <span className="font-bold text-stone-700 block">{c.name}</span>
-                                    <span className="text-[10px] text-stone-400">下單 {c.count} 次</span>
+                                    <span className="text-[10px] text-stone-400">買到 {c.count} 項商品</span>
                                 </div>
                             </div>
                             <div className="text-right">
