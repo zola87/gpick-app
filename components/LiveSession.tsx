@@ -161,10 +161,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
     if (magicTab === 'image' && !magicImage) return;
     
     setIsAnalyzing(true);
+    // Changed: Strictly using process.env.API_KEY in the service, removed geminiApiKey parameter
     const result = await smartParseOrder({ 
       imageBase64: magicTab === 'image' ? magicImage! : undefined,
       text: magicTab === 'text' ? magicText : undefined
-    }, products, customers, settings.geminiApiKey); // Pass API Key
+    }, products, customers);
     
     setIsAnalyzing(false);
     
@@ -200,8 +201,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ products, customers, s
       setIsMagicModalOpen(false);
       setMagicImage(null);
       setMagicText('');
-    } else {
-      // Alert handled in service if API Key missing, generic here
     }
   };
 
@@ -615,7 +614,6 @@ Jason: +1 藍色"
                      )}
                  </button>
                  <p className="text-[10px] text-center text-stone-400 mt-2">AI 將自動辨識客人、商品、款式與數量，並填入表單供您確認。</p>
-                 <p className="text-[10px] text-center text-stone-300 mt-1">若無法分析，請確認系統設定中已填寫 API Key</p>
               </div>
            </div>
         </div>
@@ -718,7 +716,7 @@ Jason: +1 藍色"
                                 type="number" 
                                 value={newProdTWD}
                                 onChange={(e) => setNewProdTWD(e.target.value)}
-                                className="w-full px-3 py-2 border border-stone-300 rounded-lg font-bold text-blue-600 outline-none bg-stone-50"
+                                className="w-full px-3 py-2 border border-stone-300 rounded-lg font-bold text-blue-600 outline-none"
                                 placeholder="台幣售價 $"
                             />
                             </div>
@@ -727,34 +725,41 @@ Jason: +1 藍色"
                         {/* Brand & Category */}
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <input 
+                            <input 
                                 type="text" 
                                 value={newProdBrand}
                                 onChange={(e) => setNewProdBrand(e.target.value)}
                                 className="w-full px-3 py-2 border border-stone-300 rounded-lg outline-none text-sm"
-                                placeholder="品牌 (如: Nike)"
-                                />
+                                placeholder="品牌 (可不填)"
+                            />
                             </div>
                             <div>
-                                <select 
+                            <select 
                                 value={newProdCategory}
                                 onChange={(e) => setNewProdCategory(e.target.value)}
                                 className="w-full px-3 py-2 border border-stone-300 rounded-lg outline-none text-sm bg-white"
-                                >
-                                {settings.productCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                                </select>
+                            >
+                                {settings.productCategories.map(cat => (
+                                <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                            </select>
                             </div>
                         </div>
                     </form>
                 </div>
 
-                <div className="p-4 border-t bg-stone-50">
+                <div className="p-4 border-t bg-stone-50 flex gap-3">
+                    <button 
+                        onClick={() => setIsAddProductOpen(false)}
+                        className="flex-1 px-4 py-2 border border-stone-300 rounded-lg text-stone-600 font-bold hover:bg-stone-100 transition-colors"
+                    >
+                        取消
+                    </button>
                     <button 
                         form="addProductForm"
                         type="submit"
-                        className="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium py-2 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md"
+                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md"
                     >
-                        <Plus size={18} />
                         確認上架
                     </button>
                 </div>
@@ -765,82 +770,137 @@ Jason: +1 藍色"
       {/* Edit Product Modal */}
       {editingProduct && (
           <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-                  <div className="p-4 border-b bg-stone-50 flex justify-between items-center">
-                      <h3 className="font-bold text-stone-800">編輯商品</h3>
-                      <button onClick={() => setEditingProduct(null)}><X size={20} className="text-stone-400" /></button>
-                  </div>
-                  <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
-                        <div className="text-center">
-                             <div className="flex justify-end text-xs text-blue-500 mb-1 cursor-pointer" onClick={() => setEditIsUrlMode(!editIsUrlMode)}>
-                                {editIsUrlMode ? '切換為上傳圖片' : '切換為圖片網址'}
-                             </div>
-                             
-                             {editIsUrlMode ? (
-                                <div className="flex items-center border rounded-lg px-2 bg-white mb-2">
-                                <Link size={16} className="text-stone-400 mr-2" />
-                                <input 
-                                    type="text" 
-                                    value={editingProduct.imageUrl || ''}
-                                    onChange={(e) => setEditingProduct({...editingProduct, imageUrl: e.target.value})}
-                                    className="w-full py-2 bg-transparent outline-none text-sm"
-                                    placeholder="圖片網址..."
-                                />
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="p-4 border-b bg-stone-50 flex justify-between items-center">
+                    <h2 className="text-lg font-bold text-stone-800 flex items-center">
+                        <Edit2 className="w-5 h-5 mr-2 text-blue-500" />
+                        編輯商品
+                    </h2>
+                    <button onClick={() => setEditingProduct(null)}><X size={20} className="text-stone-400 hover:text-stone-600"/></button>
+                </div>
+
+                <div className="p-6 overflow-y-auto">
+                    <div className="space-y-4">
+                        {/* Image */}
+                        <div className="flex justify-end text-xs text-blue-500 mb-1 cursor-pointer" onClick={() => setEditIsUrlMode(!editIsUrlMode)}>
+                            {editIsUrlMode ? '切換為上傳圖片' : '切換為圖片網址'}
+                        </div>
+                        {editIsUrlMode ? (
+                            <div className="flex items-center border rounded-lg px-2 bg-white">
+                            <Link size={16} className="text-stone-400 mr-2" />
+                            <input 
+                                type="text" 
+                                value={editingProduct.imageUrl || ''}
+                                onChange={(e) => setEditingProduct({...editingProduct, imageUrl: e.target.value})}
+                                className="w-full py-2 bg-transparent outline-none text-sm"
+                                placeholder="貼上圖片網址..."
+                            />
+                            </div>
+                        ) : (
+                            <div className="relative w-full h-32 border-2 border-dashed border-stone-300 rounded-lg bg-stone-50 flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-colors overflow-hidden group">
+                            <input 
+                                type="file" 
+                                accept="image/*"
+                                onChange={(e) => handleImageChange(e, true)}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                            />
+                            {editingProduct.imageUrl ? (
+                                <img src={editingProduct.imageUrl} alt="Preview" className="w-full h-full object-contain p-1" />
+                            ) : (
+                                <div className="text-center text-stone-400 group-hover:text-blue-400">
+                                <ImageIcon className="w-8 h-8 mx-auto mb-1" />
+                                <span className="text-xs">點擊更改圖片</span>
                                 </div>
-                             ) : (
-                                <div className="relative w-24 h-24 mx-auto border rounded-lg overflow-hidden cursor-pointer group">
-                                    <img src={editingProduct.imageUrl} className="w-full h-full object-cover" />
-                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <Edit2 className="text-white" size={20} />
-                                    </div>
-                                    <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleImageChange(e, true)} />
-                                </div>
-                             )}
-                        </div>
+                            )}
+                            </div>
+                        )}
+
+                        {/* Name */}
                         <div>
-                             <label className="text-xs text-stone-500">商品名稱</label>
-                             <input className="w-full border rounded px-3 py-2" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} />
+                            <label className="block text-xs text-stone-400 mb-1">商品名稱</label>
+                            <input 
+                                type="text" 
+                                value={editingProduct.name}
+                                onChange={(e) => setEditingProduct({...editingProduct, name: e.target.value})}
+                                className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                             <div>
-                                <label className="text-xs text-stone-500">品牌</label>
-                                <input className="w-full border rounded px-3 py-2" value={editingProduct.brand || ''} onChange={e => setEditingProduct({...editingProduct, brand: e.target.value})} />
-                             </div>
-                             <div>
-                                <label className="text-xs text-stone-500">分類</label>
-                                <select 
-                                    value={editingProduct.category}
-                                    onChange={(e) => setEditingProduct({...editingProduct, category: e.target.value})}
-                                    className="w-full border rounded px-3 py-2 bg-white"
-                                >
-                                    {settings.productCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                                </select>
-                             </div>
-                        </div>
-                         <div className="grid grid-cols-2 gap-3">
-                             <div>
-                                <label className="text-xs text-stone-500">日幣</label>
-                                <input type="number" className="w-full border rounded px-3 py-2" value={editingProduct.priceJPY} onChange={e => setEditingProduct({...editingProduct, priceJPY: Number(e.target.value)})} />
-                             </div>
-                             <div>
-                                <label className="text-xs text-stone-500">台幣</label>
-                                <input type="number" className="w-full border rounded px-3 py-2 font-bold text-blue-600" value={editingProduct.priceTWD} onChange={e => setEditingProduct({...editingProduct, priceTWD: Number(e.target.value)})} />
-                             </div>
-                        </div>
+
+                        {/* Variants */}
                         <div>
-                             <label className="text-xs text-stone-500">款式 (可用「.」或逗號分隔)</label>
-                             <input 
-                                className="w-full border rounded px-3 py-2" 
-                                value={Array.isArray(editingProduct.variants) ? editingProduct.variants.join('.') : editingProduct.variants} 
-                                onChange={e => setEditingProduct({...editingProduct, variants: e.target.value as any})} // Temp store as string, parsed on save
-                             />
+                            <label className="block text-xs text-stone-400 mb-1">款式 (用點號或逗號分隔)</label>
+                            <input 
+                            type="text"
+                            value={Array.isArray(editingProduct.variants) ? editingProduct.variants.join('.') : editingProduct.variants}
+                            onChange={e => setEditingProduct({...editingProduct, variants: e.target.value})}
+                            className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
                         </div>
-                  </div>
-                  <div className="p-4 border-t flex gap-3">
-                      <button onClick={() => setEditingProduct(null)} className="flex-1 py-2 bg-stone-100 rounded text-stone-600">取消</button>
-                      <button onClick={handleSaveEdit} className="flex-1 py-2 bg-blue-500 text-white rounded font-bold">儲存</button>
-                  </div>
-              </div>
+
+                        {/* Pricing */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                            <label className="block text-xs text-stone-400 mb-1">日幣 ¥</label>
+                            <input 
+                                type="number" 
+                                value={editingProduct.priceJPY}
+                                onChange={(e) => setEditingProduct({...editingProduct, priceJPY: Number(e.target.value)})}
+                                className="w-full px-3 py-2 border border-stone-300 rounded-lg outline-none"
+                            />
+                            </div>
+                            <div>
+                            <label className="block text-xs text-stone-400 mb-1">台幣 $</label>
+                            <input 
+                                type="number" 
+                                value={editingProduct.priceTWD}
+                                onChange={(e) => setEditingProduct({...editingProduct, priceTWD: Number(e.target.value)})}
+                                className="w-full px-3 py-2 border border-stone-300 rounded-lg font-bold text-blue-600 outline-none"
+                            />
+                            </div>
+                        </div>
+
+                        {/* Brand & Category */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                            <label className="block text-xs text-stone-400 mb-1">品牌</label>
+                            <input 
+                                type="text" 
+                                value={editingProduct.brand || ''}
+                                onChange={(e) => setEditingProduct({...editingProduct, brand: e.target.value})}
+                                className="w-full px-3 py-2 border border-stone-300 rounded-lg outline-none text-sm"
+                            />
+                            </div>
+                            <div>
+                            <label className="block text-xs text-stone-400 mb-1">類別</label>
+                            <select 
+                                value={editingProduct.category}
+                                onChange={(e) => setEditingProduct({...editingProduct, category: e.target.value})}
+                                className="w-full px-3 py-2 border border-stone-300 rounded-lg outline-none text-sm bg-white"
+                            >
+                                {settings.productCategories.map(cat => (
+                                <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                            </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-4 border-t bg-stone-50 flex gap-3">
+                    <button 
+                        onClick={() => setEditingProduct(null)}
+                        className="flex-1 px-4 py-2 border border-stone-300 rounded-lg text-stone-600 font-bold hover:bg-stone-100 transition-colors"
+                    >
+                        取消
+                    </button>
+                    <button 
+                        onClick={handleSaveEdit}
+                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md"
+                    >
+                        儲存變更
+                    </button>
+                </div>
+            </div>
           </div>
       )}
     </div>

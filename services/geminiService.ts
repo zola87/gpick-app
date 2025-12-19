@@ -1,12 +1,12 @@
 
+
 import { GoogleGenAI } from "@google/genai";
 import { Product, Order, Customer, GlobalSettings } from "../types";
 
-const getGeminiClient = (apiKey?: string) => {
-  // Use the provided key, or fallback to process.env (for local dev if set)
-  const key = apiKey || process.env.API_KEY;
-  if (!key) throw new Error("API Key is missing");
-  return new GoogleGenAI({ apiKey: key });
+// Helper to initialize GoogleGenAI strictly from process.env.API_KEY
+const getGeminiClient = () => {
+  if (!process.env.API_KEY) throw new Error("API Key is missing");
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 // Internal helper to calculate stats
@@ -59,11 +59,10 @@ const calculateStats = (products: Product[], orders: Order[], customers: Custome
 export const analyzeSalesData = async (
   products: Product[],
   orders: Order[],
-  customers: Customer[],
-  apiKey?: string
+  customers: Customer[]
 ): Promise<string> => {
   try {
-    const ai = getGeminiClient(apiKey);
+    const ai = getGeminiClient();
     const dataSummary = calculateStats(products, orders, customers);
 
     const prompt = `
@@ -91,23 +90,24 @@ export const analyzeSalesData = async (
       語氣請專業、鼓勵，並帶有商業洞察力。
     `;
 
+    // Always use ai.models.generateContent for querying models
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-pro-preview',
       contents: prompt,
     });
 
+    // Access the .text property directly from GenerateContentResponse
     return response.text || "無法生成分析報告。";
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
-    return "AI 分析服務無法使用。請確認您已在「系統設定」中輸入有效的 Gemini API Key。";
+    return "AI 分析服務目前無法使用，請確認 API Key 是否設定正確。";
   }
 };
 
 export const smartParseOrder = async (
   input: { text?: string; imageBase64?: string },
   products: Product[],
-  customers: Customer[],
-  apiKey?: string
+  customers: Customer[]
 ): Promise<{
   customerName: string;
   productName: string;
@@ -115,7 +115,7 @@ export const smartParseOrder = async (
   variant?: string;
 } | null> => {
   try {
-    const ai = getGeminiClient(apiKey);
+    const ai = getGeminiClient();
     
     const productList = products.map(p => `${p.name} (Variants: ${p.variants.join(',')})`).join('\n');
     const customerList = customers.map(c => `${c.lineName}`).join(', ');
@@ -165,19 +165,20 @@ export const smartParseOrder = async (
       });
     }
 
+    // Always use ai.models.generateContent with appropriate model and responseMimeType
     const response = await ai.models.generateContent({
-      model: input.imageBase64 ? 'gemini-2.5-flash' : 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: { parts },
       config: { responseMimeType: "application/json" }
     });
 
+    // Access the .text property directly from GenerateContentResponse
     const text = response.text;
     if (!text) return null;
     return JSON.parse(text);
 
   } catch (error) {
     console.error("Smart Parse Error", error);
-    alert("AI 分析失敗。請確認您已在「系統設定」中輸入有效的 Gemini API Key。");
     return null;
   }
 };
@@ -215,7 +216,7 @@ ${stats.categoryDistribution.map(c => `- ${c.category}: $${c.revenue.toLocaleStr
 ${stats.brandDistribution.map(b => `- ${b.brand}: $${b.revenue.toLocaleString()} (${b.qty}件)`).join('\n')}
 
 【🧠 請深度分析並回答】
-1. **利潤結構診斷**：我的商品結構健康嗎？有沒有「賺了營收賠了毛利」的狀況？
+1. **利利润結構診斷**：我的商品結構健康嗎？有沒有「賺了營收賠了毛利」的狀況？
 2. **客群洞察**：針對這幾位 VVIP，我有什麼方法可以讓他們下一場買更多？如何喚醒低客單價的客人？
 3. **選品策略**：根據這次的品牌與類別數據，下次去日本我應該專攻什麼？放棄什麼？
 4. **定價建議**：我的 AOV 是 $${stats.averageOrderValue}，是否需要調整定價策略或推出組合包？

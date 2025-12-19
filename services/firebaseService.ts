@@ -104,7 +104,8 @@ export const saveSettingsToCloud = async (settings: GlobalSettings) => {
     if(!db) return;
     // We do NOT save firebaseConfig to cloud to avoid circular dependency/security issues
     // We only save business rules
-    const { firebaseConfig, useCloudSync, geminiApiKey, ...businessRules } = settings;
+    // Fixed: Removed geminiApiKey from destructuring as it is not present in GlobalSettings.
+    const { firebaseConfig, useCloudSync, ...businessRules } = settings;
     try {
         const cleanRules = JSON.parse(JSON.stringify(businessRules));
         await setDoc(doc(db, COLL_SETTINGS, 'global'), cleanRules, { merge: true });
@@ -149,7 +150,8 @@ export const uploadLocalDataToCloud = async (
   }
   
   // Upload settings
-  const { firebaseConfig, useCloudSync, geminiApiKey, ...businessRules } = settings;
+  // Fixed: Removed geminiApiKey from destructuring as it is not present in GlobalSettings.
+  const { firebaseConfig, useCloudSync, ...businessRules } = settings;
   await setDoc(doc(db, COLL_SETTINGS, 'global'), JSON.parse(JSON.stringify(businessRules)));
   
   return count;

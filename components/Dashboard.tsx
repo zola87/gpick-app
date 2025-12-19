@@ -109,7 +109,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ products, orders, customer
 
   const handleRunAnalysis = async () => {
     setLoadingAi(true);
-    const result = await analyzeSalesData(products, activeOrders, customers, settings.geminiApiKey);
+    // Changed: Strictly using process.env.API_KEY in the service, removed geminiApiKey parameter
+    const result = await analyzeSalesData(products, activeOrders, customers);
     setAiAnalysis(result);
     // Auto-save the analysis to settings so it's not lost on refresh
     if (onUpdateSettings) {

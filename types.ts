@@ -1,4 +1,5 @@
 
+
 export interface FirebaseConfig {
   apiKey: string;
   authDomain: string;
@@ -20,7 +21,6 @@ export interface GlobalSettings {
   pickupPayment: number; // usually 20
   productCategories: string[]; // Custom categories
   billingMessageTemplate: string; // New: Customizable message template
-  geminiApiKey?: string; // New: User provided API key for client-side usage
   
   // Cloud Sync
   useCloudSync?: boolean;
@@ -34,6 +34,7 @@ export interface GlobalSettings {
 
   // Analysis Draft
   currentAiAnalysis?: string; // Persistent draft for current session
+  sessionName?: string; // New: Custom session name like "12月大阪聖誕"
 }
 
 export interface Product {
