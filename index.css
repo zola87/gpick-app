@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..700;1,14..32,300..700&family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+
+  /* ── 莫蘭迪 Sage & Stone design tokens ─────────────────────── */
+  --color-sidebar:       #3F4550;   /* 側邊欄底色（溫石板灰）     */
+  --color-sidebar-text:  #EEF0EC;   /* 側邊欄文字（霧白米）       */
+  --color-sidebar-muted: #8A9E90;   /* 側邊欄次要文字（灰艾草）   */
+  --color-bg:            #EDE8E3;   /* 主背景（溫奶灰陶）         */
+  --color-card:          #FAF8F5;   /* 卡片背景（暖白）           */
+  --color-accent:        #7A9E8A;   /* 強調色（灰艾草綠）         */
+  --color-accent-dark:   #5C8070;   /* 強調色 hover               */
+  --color-muted:         #8A8278;   /* 次要文字（暖灰褐）         */
+  --color-text:          #2C2926;   /* 主要文字（深暖棕）         */
+  --color-border:        rgba(160,148,136,0.18); /* 邊框          */
+  --color-dim:           #E5DFD9;   /* 淺色底（暖米白灰）         */
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Elegant thin scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #ccc7be;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b5b0a8;
+}
+
+/* Dark sidebar scrollbar */
+aside ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+aside ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Dark mobile overlay scrollbar */
+.dark-scroll ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Force inputs to be white */
+input, textarea, select {
+  background-color: #ffffff !important;
+  color: #2C2926 !important;
+}
+
+/* Smooth interactive elements */
+button {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 120ms;
+}
+
+/* Number displays */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}

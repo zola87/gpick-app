@@ -1,0 +1,8 @@
+{
+  "name": "GPick 賺錢工具",
+  "description": "日本代購現場連線管理系統，整合拍照上架、AI 喊單辨識與智慧對帳。",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

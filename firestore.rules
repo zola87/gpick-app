@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null &&
+             request.auth.token.email in ['19980531mg@gmail.com', 'forpin1014@gmail.com'];
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Customers: all signed-in can read/create; updates block sensitive fields unless admin
+    match /customers/{customerId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isAdmin() ||
+        (isSignedIn() && !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['isBlacklisted', 'totalSpent', 'isStock', 'customerToken']));
+      allow delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Public settings (customer-facing: sessionName, shippingFee, etc.)
+    match /settings/public {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // All other settings (global config, adminLine, geminiApiKey, etc.): admin only
+    match /settings/{settingId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Webhook event dedup records: only Cloud Functions admin SDK can access
+    match /processedEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /todos/{todoId} {
+      allow read, write: if isAdmin();
+    }
+    match /reports/{reportId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
