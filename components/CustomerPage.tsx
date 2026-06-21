@@ -153,6 +153,26 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
   const isDemo      = token === 'demo';
   const isUniversal = !token && !isDemo;
 
+  // ── Session persistence ──────────────────────────────────────────────────
+  const SESSION_KEY = 'gpick_customer_session';
+  const saveSession = (customerId: string) => {
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify({
+        customerId,
+        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      }));
+    } catch {}
+  };
+  const getStoredSession = (): string | null => {
+    try {
+      const s = localStorage.getItem(SESSION_KEY);
+      if (!s) return null;
+      const { customerId, expiresAt } = JSON.parse(s);
+      if (expiresAt < Date.now()) { localStorage.removeItem(SESSION_KEY); return null; }
+      return customerId as string;
+    } catch { return null; }
+  };
+
   // ── State ─────────────────────────────────────────────────────────────────
   const [customer, setCustomer]     = useState<Customer | null>(isDemo ? DEMO_CUSTOMER : null);
   const [orders,   setOrders]       = useState<Order[]>(isDemo ? DEMO_ORDERS : []);
@@ -177,7 +197,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
   const [isSavingSetup,   setIsSavingSetup]   = useState(false);
   const [showSetupErrors, setShowSetupErrors] = useState(false);
   const [pendingLineProfile, setPendingLineProfile] = useState<{ userId: string; displayName: string; pictureUrl?: string } | null>(null);
-  const [matchCandidates, setMatchCandidates] = useState<{ id: string; communityNickname: string }[]>([]);
+  const [matchCandidates, setMatchCandidates] = useState<{ id: string; lineName: string; communityNickname: string | null }[]>([]);
 
   // Tab navigation
   const [activeTab,     setActiveTab]     = useState<ActiveTab>('orders');
@@ -188,7 +208,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
     if (isDemo) return;
     let unsubs: (() => void)[] = [];
 
-    signInAnon().then((user) => {
+    signInAnon().then(async (user) => {
       if (!user) { setError('無法連接，請稍後再試'); setIsLoading(false); return; }
 
       if (!isUniversal) {
@@ -200,6 +220,17 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
         }, () => { setError('資料讀取失敗'); setIsLoading(false); });
         unsubs.push(unsubCust);
       } else {
+        // Universal mode: try restoring session from localStorage
+        const storedId = getStoredSession();
+        if (storedId) {
+          const custSnap = await getDoc(doc(db, 'customers', storedId));
+          if (custSnap.exists()) {
+            setCustomer(custSnap.data() as Customer);
+            setIsLoading(false);
+            return;
+          }
+          localStorage.removeItem(SESSION_KEY);
+        }
         setIsLoading(false);
       }
 
@@ -265,51 +296,53 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
         sessionStorage.removeItem('line_pkce_verifier');
 
         if (isUniversal) {
+          // 1. Try to find by lineUserId (returning user who already linked)
           const snap = await getDocs(query(collection(db, 'customers'), where('lineUserId', '==', profile.userId)));
-          if (snap.empty) {
-            setPendingLineProfile({ userId: profile.userId, displayName: profile.displayName, pictureUrl: profile.pictureUrl });
-            setSetupNickname('');
-            setSetupBirthYear(''); setSetupBirthMonth(''); setSetupBirthDay('');
-            setSetupGender('');
-            setLineStatus('newCustomer');
+          if (!snap.empty) {
+            const found = snap.docs[0].data() as Customer;
+            const updated: Customer = { ...found, lineName: profile.displayName, lineAvatarUrl: profile.pictureUrl ?? found.lineAvatarUrl };
+            await updateDocument('customers', updated);
+            setCustomer(updated);
+            saveSession(updated.id);
+            window.history.replaceState(null, '', `${window.location.pathname}#/c`);
+            setLineStatus('idle');
             return;
           }
-          const found = snap.docs[0].data() as Customer;
-          const updated: Customer = { ...found, lineName: profile.displayName, lineAvatarUrl: profile.pictureUrl ?? found.lineAvatarUrl };
-          await updateDocument('customers', updated);
-          setCustomer(updated);
-          window.history.replaceState(null, '', `${window.location.pathname}#/c`);
-          if (!found.communityNickname || !found.birthDate || !found.gender) {
-            setSetupNickname(found.communityNickname ?? '');
-            if (found.birthDate) {
-              const parts = found.birthDate.split('-');
-              setSetupBirthYear(parts[0] ?? '');
-              setSetupBirthMonth(parts[1] ?? '');
-              setSetupBirthDay(parts[2] ?? '');
+
+          // 2. Not found by ID — try matching by LINE display name
+          setPendingLineProfile({ userId: profile.userId, displayName: profile.displayName, pictureUrl: profile.pictureUrl });
+          try {
+            const matchFn = httpsCallable<
+              { displayName: string },
+              { candidates: { id: string; lineName: string; communityNickname: string | null }[] }
+            >(functions, 'matchCustomerByLineName');
+            const result = await matchFn({ displayName: profile.displayName });
+            if (result.data.candidates.length > 0) {
+              setMatchCandidates(result.data.candidates);
+              setLineStatus('confirmMatch');
+              return;
             }
-            setSetupGender(found.gender ?? '');
-            setLineStatus('needsProfile');
-            return;
+          } catch (e) {
+            console.error('matchCustomerByLineName failed', e);
           }
-          setLineStatus('idle');
+
+          // 3. No match — auto-create new customer
+          await handleAutoCreateNew({ userId: profile.userId, displayName: profile.displayName, pictureUrl: profile.pictureUrl });
           return;
         }
 
-        await updateDocument('customers', {
+        // Token-based: customer linked LINE from 我的 tab
+        const linkedCustomer: Customer = {
           ...customer!,
           lineUserId:    profile.userId,
           lineName:      profile.displayName,
-          lineAvatarUrl: profile.pictureUrl ?? null,
-        });
-        setSetupNickname(customer!.communityNickname ?? '');
-        if (customer!.birthDate) {
-          const parts = customer!.birthDate.split('-');
-          setSetupBirthYear(parts[0] ?? '');
-          setSetupBirthMonth(parts[1] ?? '');
-          setSetupBirthDay(parts[2] ?? '');
-        }
-        setSetupGender(customer!.gender ?? '');
-        setLineStatus('needsProfile');
+          lineAvatarUrl: profile.pictureUrl ?? undefined,
+        };
+        await updateDocument('customers', linkedCustomer);
+        setCustomer(linkedCustomer);
+        saveSession(linkedCustomer.id);
+        window.history.replaceState(null, '', `${window.location.pathname}#/c/${token}`);
+        setLineStatus('idle');
 
       } catch (err: any) {
         console.error('LINE login callback failed', err);
@@ -413,7 +446,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
         { matches: { id: string; communityNickname: string }[] }
       >(functions, 'findCustomerMatches');
       const result = await findMatches({ nickname: setupNickname.trim() });
-      const candidates = result.data.matches;
+      const candidates = result.data.matches.map(m => ({ ...m, lineName: m.communityNickname }));
       if (candidates.length > 0) {
         setMatchCandidates(candidates);
         setIsSavingSetup(false);
@@ -426,34 +459,52 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
     await createNewCustomerRecord(birthDate);
   };
 
-  const handleConfirmMatch = async (candidate: { id: string; communityNickname: string }) => {
+  const handleConfirmMatch = async (candidateId: string) => {
     if (!pendingLineProfile) return;
     setIsSavingSetup(true);
-    const birthDate = `${setupBirthYear}-${setupBirthMonth.padStart(2,'0')}-${setupBirthDay.padStart(2,'0')}`;
-    const fullSnap = await getDoc(doc(db, 'customers', candidate.id));
+    const fullSnap = await getDoc(doc(db, 'customers', candidateId));
     if (!fullSnap.exists()) { setIsSavingSetup(false); return; }
     const fullCustomer = fullSnap.data() as Customer;
     const updated: Customer = {
       ...fullCustomer,
-      lineUserId:        pendingLineProfile.userId,
-      lineName:          pendingLineProfile.displayName,
-      lineAvatarUrl:     pendingLineProfile.pictureUrl ?? fullCustomer.lineAvatarUrl,
-      communityNickname: setupNickname.trim(),
-      birthDate,
-      gender: setupGender as Gender,
+      lineUserId:    pendingLineProfile.userId,
+      lineName:      pendingLineProfile.displayName,
+      lineAvatarUrl: pendingLineProfile.pictureUrl ?? fullCustomer.lineAvatarUrl,
     };
     await updateDocument('customers', updated);
     setCustomer(updated);
+    saveSession(updated.id);
     setPendingLineProfile(null);
     setMatchCandidates([]);
     setIsSavingSetup(false);
-    window.location.replace(`${window.location.pathname}#/c`);
+    window.history.replaceState(null, '', `${window.location.pathname}#/c`);
+    setLineStatus('idle');
   };
 
   const handleNotMeCreateNew = async () => {
+    if (!pendingLineProfile) return;
     setIsSavingSetup(true);
-    const birthDate = `${setupBirthYear}-${setupBirthMonth.padStart(2,'0')}-${setupBirthDay.padStart(2,'0')}`;
-    await createNewCustomerRecord(birthDate);
+    await handleAutoCreateNew(pendingLineProfile);
+    setIsSavingSetup(false);
+  };
+
+  const handleAutoCreateNew = async (profile: { userId: string; displayName: string; pictureUrl?: string }) => {
+    const newCustomer: Customer = {
+      id: generateId(),
+      lineName:      profile.displayName,
+      lineUserId:    profile.userId,
+      lineAvatarUrl: profile.pictureUrl,
+      isBlacklisted: false,
+      totalSpent:    0,
+      sessionCount:  0,
+    };
+    await addDocument('customers', newCustomer);
+    setCustomer(newCustomer);
+    saveSession(newCustomer.id);
+    setPendingLineProfile(null);
+    setMatchCandidates([]);
+    window.history.replaceState(null, '', `${window.location.pathname}#/c`);
+    setLineStatus('idle');
   };
 
   const openEditProfile = () => {
@@ -685,39 +736,64 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
   }
 
   // Confirm match
-  if (lineStatus === 'confirmMatch') {
+  if (lineStatus === 'confirmMatch' && matchCandidates.length > 0) {
+    const candidate = matchCandidates[0];
     return (
-      <div className="min-h-screen bg-[#EDE8E3] flex flex-col items-center justify-center p-6 text-center gap-5">
-        <div className="w-16 h-16 bg-[#FAF8F5] rounded-3xl flex items-center justify-center shadow-sm">
-          <AlertCircle size={28} className="text-[#7A9E8A]" />
-        </div>
-        <div>
-          <h2 className="text-lg font-bold text-[#2C2926] mb-1.5">這是你嗎？</h2>
-          <p className="text-sm text-[#8A8278] leading-relaxed max-w-xs">
-            我們找到社群中有相似暱稱的舊資料，<br />
-            請確認是否為你本人，以同步過去的訂單記錄。
-          </p>
-        </div>
-        <div className="w-full max-w-xs space-y-2">
-          {matchCandidates.map(c => (
+      <div className="min-h-screen bg-[#EDE8E3] flex flex-col items-center justify-center p-6">
+        <div className="bg-[#FAF8F5] rounded-2xl w-full max-w-sm p-6 shadow-sm space-y-5">
+          {/* LINE avatar */}
+          <div className="flex flex-col items-center gap-3 pb-2">
+            {pendingLineProfile?.pictureUrl ? (
+              <img src={pendingLineProfile.pictureUrl} alt="" className="w-14 h-14 rounded-full object-cover ring-2 ring-[#06C755]/20" />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-[#06C755]/10 flex items-center justify-center text-[#06C755] font-bold text-2xl">
+                {pendingLineProfile?.displayName?.[0] ?? '?'}
+              </div>
+            )}
+            <div className="text-center">
+              <p className="font-bold text-[#2C2926]">{pendingLineProfile?.displayName}</p>
+              <p className="text-xs text-[#ADA49C] mt-0.5">你的 LINE 帳號</p>
+            </div>
+          </div>
+
+          <div className="border-t border-[#F0EDE9] pt-4">
+            <p className="text-sm font-semibold text-[#2C2926] mb-1">找到一筆資料，請確認是否為你？</p>
+            <p className="text-xs text-[#8A8278] mb-3 leading-relaxed">
+              系統在訂單資料中找到名稱相似的紀錄。如果是你，過去的訂單將自動連結。
+            </p>
+            <div className="bg-[#F0EDE9] rounded-xl p-4 space-y-2.5">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-[#ADA49C]">LINE 名稱</span>
+                <span className="font-semibold text-[#2C2926]">{candidate.lineName}</span>
+              </div>
+              {candidate.communityNickname && (
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-[#ADA49C]">社群暱稱</span>
+                  <span className="font-semibold text-[#2C2926]">{candidate.communityNickname}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2.5 pt-1">
             <button
-              key={c.id}
-              onClick={() => handleConfirmMatch(c)}
+              onClick={() => handleConfirmMatch(candidate.id)}
               disabled={isSavingSetup}
-              className="w-full py-3 bg-[#FAF8F5] border border-[#E5DFD9] rounded-xl text-sm font-medium text-[#2C2926] hover:border-[#7A9E8A] transition-colors disabled:opacity-60"
+              className="w-full py-3.5 bg-[#7A9E8A] text-white font-bold rounded-xl flex items-center justify-center gap-2 disabled:opacity-60"
             >
-              暱稱：{c.communityNickname}
+              {isSavingSetup ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+              是我，確認登入
             </button>
-          ))}
+            <button
+              onClick={handleNotMeCreateNew}
+              disabled={isSavingSetup}
+              className="w-full py-3.5 bg-[#F0EDE9] text-[#8A8278] font-medium rounded-xl disabled:opacity-60"
+            >
+              不是我，建立新帳號
+            </button>
+          </div>
         </div>
-        <button
-          onClick={handleNotMeCreateNew}
-          disabled={isSavingSetup}
-          className="px-5 py-2.5 bg-[#E5DFD9] text-[#2C2926] rounded-xl text-sm font-medium disabled:opacity-60"
-        >
-          {isSavingSetup ? '處理中…' : '都不是，建立新資料'}
-        </button>
-        <p className="text-xs text-[#C5BEB7]">GPick 代購管理系統</p>
+        <p className="text-xs text-[#C5BEB7] mt-6">GPick 代購管理系統</p>
       </div>
     );
   }
@@ -753,10 +829,49 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
   // LINE login wall
   const showLineLoginWall = isUniversal ? !customer : (!!customer && !isLineLinked && !isDemo);
   if (showLineLoginWall) {
-    const title    = isUniversal ? '使用 LINE 登入查看訂單' : '先連結 LINE 帳號';
-    const subtitle = isUniversal
-      ? '登入後即可查看你的訂單與本場商品。\n只需授權一次，下次直接開啟。'
-      : '連結後才能查看訂單狀態和匯款金額。\n只需要授權一次，下次直接開啟。';
+    if (isUniversal) {
+      return (
+        <div className="min-h-screen bg-[#EDE8E3] flex flex-col">
+          {/* Header */}
+          <div className="bg-[#FAF8F5] px-5 py-4 flex items-center gap-2.5 border-b border-[#F0EDE9]">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+              style={{ background: 'linear-gradient(135deg, #7A9E8A, #5C8070)' }}>
+              <CloudLightning size={13} className="text-white" />
+            </div>
+            <span className="text-sm font-bold text-[#2C2926] tracking-tight">GPick</span>
+          </div>
+
+          <div className="flex-1 flex flex-col items-center justify-center px-6 pb-10">
+              {/* Welcome copy */}
+            <h2 className="text-2xl font-bold text-[#2C2926] mb-2 text-center">歡迎使用 GPick</h2>
+            <p className="text-sm text-[#8A8278] text-center leading-relaxed mb-8 max-w-xs">
+              日本代購專屬平台，讓你隨時掌握<br />訂單進度、瀏覽商品清單。
+            </p>
+
+            {lineStatus === 'error' && lineError && (
+              <p className="text-xs text-rose-500 bg-rose-50 px-4 py-2 rounded-xl mb-4">{lineError}</p>
+            )}
+
+            {/* LINE login button */}
+            <button
+              onClick={handleLineLogin}
+              disabled={lineStatus === 'processing'}
+              className="w-full max-w-xs py-4 bg-[#06C755] text-white rounded-2xl text-base font-bold flex items-center justify-center gap-2.5 disabled:opacity-60 shadow-xl shadow-[#06C755]/25 active:scale-95 transition-transform"
+            >
+              {lineStatus === 'processing' ? (
+                <><Loader2 size={18} className="animate-spin" />請稍候…</>
+              ) : (
+                <><LineIcon size={22} color="white" />使用 LINE 登入</>
+              )}
+            </button>
+
+            <p className="text-xs text-[#C5BEB7] mt-5">登入即表示同意 GPick 服務條款</p>
+          </div>
+        </div>
+      );
+    }
+
+    // Token-based: customer needs to link LINE
     return (
       <div className="min-h-screen bg-[#EDE8E3] flex flex-col">
         <div className="bg-[#3F4550] px-5 py-4 flex items-center gap-3">
@@ -774,8 +889,10 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
             <LineIcon size={40} color="#06C755" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-[#2C2926] mb-2">{title}</h2>
-            <p className="text-sm text-[#8A8278] leading-relaxed max-w-xs whitespace-pre-line">{subtitle}</p>
+            <h2 className="text-xl font-bold text-[#2C2926] mb-2">先連結 LINE 帳號</h2>
+            <p className="text-sm text-[#8A8278] leading-relaxed max-w-xs">
+              連結後才能查看訂單狀態和匯款金額。<br />只需要授權一次，下次直接開啟。
+            </p>
           </div>
           {lineStatus === 'error' && lineError && (
             <p className="text-xs text-rose-500 bg-rose-50 px-4 py-2 rounded-xl">{lineError}</p>

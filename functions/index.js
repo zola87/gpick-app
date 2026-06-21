@@ -53,6 +53,32 @@ exports.sendLineMessage = onCall({ secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async
   return { success: true };
 });
 
+// ── 依 LINE 顯示名稱比對客人（客人首次登入用）────────────────────────────────
+exports.matchCustomerByLineName = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', '需要登入');
+  const { displayName } = request.data || {};
+  if (!displayName || typeof displayName !== 'string' || displayName.length > 100)
+    throw new HttpsError('invalid-argument', '無效的顯示名稱');
+
+  const nd   = normalizeStr(displayName);
+  const snap = await db.collection('customers').get();
+  const candidates = [];
+
+  for (const d of snap.docs) {
+    const c = d.data();
+    if (c.lineUserId || c.isStock || !c.lineName) continue;
+    const nl        = normalizeStr(c.lineName);
+    const threshold = Math.max(nl.length, nd.length) <= 4 ? 1 : 2;
+    const isSimilar = nl === nd || nl.includes(nd) || nd.includes(nl) ||
+                      levenshtein(nl, nd) <= threshold;
+    if (isSimilar)
+      candidates.push({ id: d.id, lineName: c.lineName, communityNickname: c.communityNickname ?? null });
+    if (candidates.length >= 3) break;
+  }
+
+  return { candidates };
+});
+
 // ── 客人暱稱比對（CustomerPage onCall）— 伺服器端比對，避免把全部客戶資料傳到瀏覽器
 exports.findCustomerMatches = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', '需要登入');
