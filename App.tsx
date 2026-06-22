@@ -659,13 +659,25 @@ export const showAlert = (message: string) => {
 };
 
 export default function App() {
-  // LINE OAuth callback: ?code=XXX&state=customer_TOKEN (empty token = universal mode)
-  const searchParams = new URLSearchParams(window.location.search);
-  const lineCode  = searchParams.get('code');
-  const lineState = searchParams.get('state');
-  if (lineCode && lineState?.startsWith('customer_')) {
-    const customerToken = lineState.slice('customer_'.length) || undefined; // '' → undefined = universal
-    return <CustomerPage token={customerToken} lineCallbackCode={lineCode} />;
+  // Any query params at root = LINE OAuth callback (success or cancel/error).
+  // Normal GPick navigation never adds query params to the root URL.
+  if (window.location.search) {
+    const searchParams  = new URLSearchParams(window.location.search);
+    const lineCode      = searchParams.get('code');
+    const lineState     = searchParams.get('state');
+    const customerToken = lineState?.startsWith('customer_')
+      ? (lineState.slice('customer_'.length) || undefined)
+      : undefined;
+
+    sessionStorage.removeItem('gpick_line_return');
+
+    if (lineCode) {
+      // Success: hand off to CustomerPage to process the OAuth code
+      return <CustomerPage token={customerToken} lineCallbackCode={lineCode} />;
+    }
+    // Cancel or error: always go back to customer page, never show admin
+    window.location.replace(`/${customerToken ? `#/c/${customerToken}` : '#/c'}`);
+    return <div className="min-h-screen bg-[#EDE8E3]" />;
   }
 
   // Hash-based routing: #/c → universal | #/c/TOKEN → token mode

@@ -380,6 +380,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
       const verifier  = generateVerifier();
       const challenge = await generateChallenge(verifier);
       sessionStorage.setItem('line_pkce_verifier', verifier);
+      sessionStorage.setItem('gpick_line_return', token ?? '');
       const params = new URLSearchParams({
         response_type:         'code',
         client_id:             LINE_CLIENT_ID,
