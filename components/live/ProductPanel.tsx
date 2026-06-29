@@ -1,8 +1,90 @@
 import React from 'react';
-import { Plus, X, Edit2, Trash2, Minus, Camera, Link, Check, Search, Crop } from 'lucide-react';
+import { Plus, X, Edit2, Trash2, Minus, Camera, Link, Check, Search, Crop, ArrowUp, ArrowDown } from 'lucide-react';
 import { SourcingLocation } from '../../types';
 import { ProductPanelProps } from './liveTypes';
-import { DEFAULT_GACHA_IMAGE } from './liveUtils';
+import { DEFAULT_GACHA_IMAGE, MAX_PRODUCT_IMAGES } from './liveUtils';
+
+// ── Unified photo manager: file picker (multi-select) or URL mode, reorder & cover ──
+const PhotoManager: React.FC<{
+  images: string[];
+  onChange: (next: string[]) => void;
+  isUrlMode: boolean;
+  setIsUrlMode: (v: boolean) => void;
+  imageUrlInput: string;
+  setImageUrlInput: (v: string) => void;
+  onFilesSelected: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onCropRequest: (url: string, index: number) => void;
+}> = ({ images, onChange, isUrlMode, setIsUrlMode, imageUrlInput, setImageUrlInput, onFilesSelected, onCropRequest }) => {
+  const fileRef = React.useRef<HTMLInputElement>(null);
+  const move = (idx: number, dir: -1 | 1) => {
+    const next = [...images];
+    const j = idx + dir;
+    [next[idx], next[j]] = [next[j], next[idx]];
+    onChange(next);
+  };
+  const remove = (idx: number) => onChange(images.filter((_, i) => i !== idx));
+  const addUrl = () => {
+    if (imageUrlInput.trim() && images.length < MAX_PRODUCT_IMAGES) {
+      onChange([...images, imageUrlInput.trim()]);
+      setImageUrlInput('');
+    }
+  };
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-2 ml-1">
+        <label className="text-xs text-stone-500">商品照片 (最多 {MAX_PRODUCT_IMAGES} 張，第一張為封面)</label>
+        <button type="button" onClick={() => setIsUrlMode(!isUrlMode)} className="text-xs text-[#7A9E8A] flex items-center gap-1">
+          {isUrlMode ? <Camera size={12} /> : <Link size={12} />}
+          {isUrlMode ? '切換相機/相簿' : '切換網址輸入'}
+        </button>
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={onFilesSelected} />
+      {images.length === 0 ? (
+        isUrlMode ? (
+          <div className="flex gap-2">
+            <input type="text" className="flex-1 p-3 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-[#7A9E8A]" placeholder="請輸入圖片網址 (URL)" value={imageUrlInput} onChange={e => setImageUrlInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && addUrl()} />
+            <button type="button" onClick={addUrl} className="px-4 bg-[#7A9E8A] text-white rounded-xl text-sm">新增</button>
+          </div>
+        ) : (
+          <div onClick={() => fileRef.current?.click()} className="relative w-full h-48 border-2 border-dashed border-stone-300 rounded-2xl bg-stone-50 flex flex-col items-center justify-center cursor-pointer hover:border-[#7A9E8A]/40 transition-all">
+            <div className="text-center text-stone-400">
+              <Camera size={40} className="mx-auto mb-2 opacity-50" />
+              <p>點擊/手機選擇圖片 (可多選)</p>
+            </div>
+          </div>
+        )
+      ) : (
+        <div className="space-y-2">
+          <div className="grid grid-cols-4 gap-2">
+            {images.map((url, idx) => (
+              <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-stone-200 bg-stone-50 group">
+                <img src={url} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" loading="lazy" />
+                {idx === 0 && <span className="absolute top-1 left-1 bg-[#7A9E8A] text-white text-[9px] px-1.5 py-0.5 rounded-md font-medium">封面</span>}
+                <button type="button" onClick={() => onCropRequest(url, idx)} className="absolute top-1 right-1 p-1 bg-white/90 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"><Crop size={11} /></button>
+                <div className="absolute bottom-1 inset-x-1 flex items-center justify-between gap-0.5">
+                  <button type="button" disabled={idx === 0} onClick={() => move(idx, -1)} className="p-1 bg-white/90 rounded-md disabled:opacity-30 disabled:cursor-not-allowed"><ArrowUp size={11} /></button>
+                  <button type="button" disabled={idx === images.length - 1} onClick={() => move(idx, 1)} className="p-1 bg-white/90 rounded-md disabled:opacity-30 disabled:cursor-not-allowed"><ArrowDown size={11} /></button>
+                  <button type="button" onClick={() => remove(idx)} className="p-1 bg-white/90 text-red-500 rounded-md"><X size={11} /></button>
+                </div>
+              </div>
+            ))}
+            {!isUrlMode && images.length < MAX_PRODUCT_IMAGES && (
+              <button type="button" onClick={() => fileRef.current?.click()} className="aspect-square border-2 border-dashed border-stone-300 rounded-xl flex items-center justify-center text-stone-400 hover:border-[#7A9E8A]/40 hover:text-[#7A9E8A] transition-colors">
+                <Plus size={20} />
+              </button>
+            )}
+          </div>
+          {isUrlMode && images.length < MAX_PRODUCT_IMAGES && (
+            <div className="flex gap-2">
+              <input type="text" className="flex-1 p-2 bg-stone-50 border border-stone-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#7A9E8A]" placeholder="請輸入圖片網址 (URL)" value={imageUrlInput} onChange={e => setImageUrlInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && addUrl()} />
+              <button type="button" onClick={addUrl} className="px-3 bg-[#7A9E8A] text-white rounded-lg text-xs">新增</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const ProductPanel: React.FC<ProductPanelProps> = ({
   products, filteredProducts, settings, customers,
@@ -23,11 +105,30 @@ export const ProductPanel: React.FC<ProductPanelProps> = ({
   isVariantSettingsOpen, setIsVariantSettingsOpen,
   isAddingNewCategory, setIsAddingNewCategory,
   quickCategoryName, setQuickCategoryName,
-  imagePreview, isUrlMode, setIsUrlMode, imageUrlInput, setImageUrlInput,
-  fileInputRef, handleImageChange, handleCreateProduct,
+  newProdImages, setNewProdImages, isUrlMode, setIsUrlMode, imageUrlInput, setImageUrlInput,
+  handleImagesChange, handleCreateProduct,
+  newProdDescription, setNewProdDescription,
+  newProdIsPublished, setNewProdIsPublished,
+  newProdIsSoldOut, setNewProdIsSoldOut,
   locationModalData, setLocationModalData,
   setCropImageSrc, setCropTarget,
+  onBulkUpdateByBrand,
 }) => {
+  const [bulkBrand, setBulkBrand] = React.useState('');
+  const [bulkAction, setBulkAction] = React.useState<'publish' | 'unpublish' | 'soldout' | 'available'>('publish');
+  const allBrands = Array.from(new Set(products.map(p => p.brand).filter(Boolean) as string[])).sort();
+
+  const applyBulkAction = () => {
+    if (!bulkBrand) return;
+    const patch = {
+      publish:   { isPublished: true },
+      unpublish: { isPublished: false },
+      soldout:   { isSoldOut: true },
+      available: { isSoldOut: false },
+    }[bulkAction];
+    onBulkUpdateByBrand(bulkBrand, patch);
+  };
+
   return (
     <>
       {/* Delete Confirmation Modal */}
@@ -52,39 +153,76 @@ export const ProductPanel: React.FC<ProductPanelProps> = ({
       {/* Product List */}
       <div className="lg:col-span-8">
         <div className="bg-white rounded-2xl shadow-md border border-stone-200 flex flex-col min-h-[600px] w-full">
-          <div className="px-4 py-2 bg-stone-50 flex flex-row items-center gap-4 min-h-[44px]">
-            <h3 className="text-stone-800 text-sm flex items-center gap-2 whitespace-nowrap">商品列表</h3>
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" size={16} />
-              <input
-                type="text"
-                className="w-full pl-10 pr-4 py-2.5 rounded-full border border-stone-200 text-sm focus:ring-2 focus:ring-[#7A9E8A] outline-none bg-white"
-                placeholder="搜尋商品名稱、品牌或類別..."
-                value={listSearchTerm}
-                onChange={e => { setListSearchTerm(e.target.value); setIsListSearchDropdownOpen(true); }}
-                onFocus={() => setIsListSearchDropdownOpen(true)}
-                onBlur={() => setTimeout(() => setIsListSearchDropdownOpen(false), 200)}
-              />
-              {isListSearchDropdownOpen && listSearchTerm && (
-                <div className="absolute top-full left-0 w-full bg-white border border-stone-200 shadow-2xl rounded-xl z-50 mt-1 max-h-60 overflow-y-auto">
-                  {products.filter(p =>
-                    p.name.toLowerCase().includes(listSearchTerm.toLowerCase()) ||
-                    p.brand?.toLowerCase().includes(listSearchTerm.toLowerCase()) ||
-                    p.category?.toLowerCase().includes(listSearchTerm.toLowerCase())
-                  ).map(p => (
-                    <button key={p.id} className="w-full text-left px-4 py-3 hover:bg-[#E5EFEA] border-b border-stone-100 last:border-0 flex items-center gap-3 transition-colors" onClick={() => { setListSearchTerm(p.name); setIsListSearchDropdownOpen(false); }}>
-                      <img src={(p.imageUrl && !p.imageUrl.includes('picsum.photos')) ? p.imageUrl : (p.category === '扭蛋' ? DEFAULT_GACHA_IMAGE : (p.imageUrl || 'https://picsum.photos/seed/product/100/100'))} className="w-10 h-10 rounded object-cover border border-stone-200" alt={p.name} referrerPolicy="no-referrer" loading="lazy" />
-                      <div className="text-stone-700 text-xs truncate">{p.name}</div>
-                    </button>
-                  ))}
-                </div>
-              )}
+          <div className="px-4 py-2 bg-stone-50 flex flex-col gap-2">
+            <div className="flex flex-row items-center gap-4 min-h-[36px]">
+              <h3 className="text-stone-800 text-sm flex items-center gap-2 whitespace-nowrap">商品列表</h3>
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" size={16} />
+                <input
+                  type="text"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-full border border-stone-200 text-sm focus:ring-2 focus:ring-[#7A9E8A] outline-none bg-white"
+                  placeholder="搜尋商品名稱、品牌或類別..."
+                  value={listSearchTerm}
+                  onChange={e => { setListSearchTerm(e.target.value); setIsListSearchDropdownOpen(true); }}
+                  onFocus={() => setIsListSearchDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setIsListSearchDropdownOpen(false), 200)}
+                />
+                {isListSearchDropdownOpen && listSearchTerm && (
+                  <div className="absolute top-full left-0 w-full bg-white border border-stone-200 shadow-2xl rounded-xl z-50 mt-1 max-h-60 overflow-y-auto">
+                    {products.filter(p =>
+                      p.name.toLowerCase().includes(listSearchTerm.toLowerCase()) ||
+                      p.brand?.toLowerCase().includes(listSearchTerm.toLowerCase()) ||
+                      p.category?.toLowerCase().includes(listSearchTerm.toLowerCase())
+                    ).map(p => (
+                      <button key={p.id} className="w-full text-left px-4 py-3 hover:bg-[#E5EFEA] border-b border-stone-100 last:border-0 flex items-center gap-3 transition-colors" onClick={() => { setListSearchTerm(p.name); setIsListSearchDropdownOpen(false); }}>
+                        <img src={(p.imageUrl && !p.imageUrl.includes('picsum.photos')) ? p.imageUrl : (p.category === '扭蛋' ? DEFAULT_GACHA_IMAGE : (p.imageUrl || 'https://picsum.photos/seed/product/100/100'))} className="w-10 h-10 rounded object-cover border border-stone-200" alt={p.name} referrerPolicy="no-referrer" loading="lazy" />
+                        <div className="text-stone-700 text-xs truncate">{p.name}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
+            {allBrands.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-stone-400 whitespace-nowrap">批次操作</span>
+                <select
+                  value={bulkBrand}
+                  onChange={e => setBulkBrand(e.target.value)}
+                  className="text-xs border border-stone-200 rounded-full px-2.5 py-1.5 outline-none bg-white text-stone-600 flex-1 min-w-[90px] max-w-[140px]"
+                >
+                  <option value="">選擇品牌...</option>
+                  {allBrands.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <select
+                  value={bulkAction}
+                  onChange={e => setBulkAction(e.target.value as typeof bulkAction)}
+                  className="text-xs border border-stone-200 rounded-full px-2.5 py-1.5 outline-none bg-white text-stone-600 flex-1 min-w-[90px] max-w-[140px]"
+                >
+                  <option value="publish">上架</option>
+                  <option value="unpublish">下架</option>
+                  <option value="soldout">標記已結單</option>
+                  <option value="available">取消已結單</option>
+                </select>
+                <button
+                  type="button"
+                  disabled={!bulkBrand}
+                  onClick={applyBulkAction}
+                  className="text-xs px-3 py-1.5 rounded-full bg-[#E5EFEA] text-[#3F6B52] border border-[#7A9E8A]/30 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                >套用</button>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-3 md:p-6 overflow-y-auto">
             {filteredProducts.map(product => (
               <div key={product.id} className="flex flex-col p-3 md:p-4 border border-stone-100 rounded-2xl hover:border-[#7A9E8A]/40 hover:shadow-lg hover:shadow-[#7A9E8A]/10 transition-all group relative bg-white">
+                {(product.isPublished === false || product.isSoldOut) && (
+                  <div className="flex gap-1.5 mb-2">
+                    {product.isPublished === false && <span className="px-2 py-0.5 bg-stone-100 text-stone-500 rounded-md text-[11px] font-medium">未上架</span>}
+                    {product.isSoldOut && <span className="px-2 py-0.5 bg-orange-100 text-orange-600 rounded-md text-[11px] font-medium">已結單</span>}
+                  </div>
+                )}
                 <div className="flex gap-3 mb-3">
                   <div className="w-20 h-20 md:w-24 md:h-24 rounded-xl overflow-hidden bg-stone-50 border border-stone-100 flex-shrink-0">
                     <img src={(product.imageUrl && !product.imageUrl.includes('picsum.photos')) ? product.imageUrl : (product.category === '扭蛋' ? DEFAULT_GACHA_IMAGE : (product.imageUrl || 'https://picsum.photos/seed/product/200/200'))} className="w-full h-full object-contain" alt={product.name} referrerPolicy="no-referrer" loading="lazy" />
@@ -161,43 +299,16 @@ export const ProductPanel: React.FC<ProductPanelProps> = ({
               <button onClick={() => setIsAddProductOpen(false)}><X size={20} className="text-stone-500" /></button>
             </div>
             <div className="p-6 space-y-4 overflow-y-auto">
-              <div className="flex justify-end items-center mb-1 ml-1">
-                <button type="button" onClick={() => setIsUrlMode(!isUrlMode)} className="text-xs text-[#7A9E8A] flex items-center gap-1">
-                  {isUrlMode ? <Camera size={12} /> : <Link size={12} />}
-                  {isUrlMode ? '切換相機拍照' : '切換網址輸入'}
-                </button>
-              </div>
-
-              {isUrlMode ? (
-                <div className="space-y-2">
-                  <input type="text" className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-[#7A9E8A] h-[60px]" placeholder="請輸入圖片網址 (URL)..." value={imageUrlInput} onChange={e => setImageUrlInput(e.target.value)} />
-                  {imageUrlInput && (
-                    <div className="w-full h-32 border rounded-xl overflow-hidden bg-stone-50">
-                      <img src={imageUrlInput} className="w-full h-full object-contain" alt="URL Preview" referrerPolicy="no-referrer" loading="lazy" />
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="relative w-full h-48 border-2 border-dashed border-stone-300 rounded-2xl bg-stone-50 flex flex-col items-center justify-center cursor-pointer hover:border-[#7A9E8A]/40 transition-all overflow-hidden">
-                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 z-10 cursor-pointer" />
-                  {imagePreview ? (
-                    <div className="relative w-full h-full group">
-                      <img src={imagePreview} className="w-full h-full object-contain p-2" alt="File Preview" referrerPolicy="no-referrer" loading="lazy" />
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setCropImageSrc(imagePreview); setCropTarget({ type: 'newProduct' }); }}
-                        className="absolute top-2 right-2 p-2 bg-white/90 text-stone-700 rounded-lg shadow-sm opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-xs font-medium hover:bg-white z-20"
-                      >
-                        <Crop size={14} /> 裁切
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="text-center text-stone-400">
-                      <Camera size={40} className="mx-auto mb-2 opacity-50" />
-                      <p>點擊/手機選擇圖片</p>
-                    </div>
-                  )}
-                </div>
-              )}
+              <PhotoManager
+                images={newProdImages}
+                onChange={setNewProdImages}
+                isUrlMode={isUrlMode}
+                setIsUrlMode={setIsUrlMode}
+                imageUrlInput={imageUrlInput}
+                setImageUrlInput={setImageUrlInput}
+                onFilesSelected={handleImagesChange}
+                onCropRequest={(url, idx) => { setCropImageSrc(url); setCropTarget({ type: 'newProduct', index: idx }); }}
+              />
 
               <div className="space-y-4">
                 <div>
@@ -286,6 +397,23 @@ export const ProductPanel: React.FC<ProductPanelProps> = ({
                     }} className="px-3 py-2 bg-[#7A9E8A] text-white rounded-lg text-xs">新增</button>
                   </div>
                 )}
+
+
+                <div>
+                  <label className="block text-xs text-stone-500 mb-1 ml-1">商品說明 / 尺寸表 (選填)</label>
+                  <textarea className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:ring-2 focus:ring-[#7A9E8A] text-sm min-h-[90px]" placeholder={'例如：\nS：胸圍86 腰圍64\nM：胸圍90 腰圍68'} value={newProdDescription} onChange={e => setNewProdDescription(e.target.value)} />
+                </div>
+
+                <div className="flex gap-4 bg-stone-50 border border-stone-200 rounded-xl p-3">
+                  <label className="flex items-center gap-2 text-sm text-stone-700 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-[#7A9E8A]" checked={newProdIsPublished} onChange={e => setNewProdIsPublished(e.target.checked)} />
+                    上架顯示在客人頁面
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-stone-700 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-[#7A9E8A]" checked={newProdIsSoldOut} onChange={e => setNewProdIsSoldOut(e.target.checked)} />
+                    已結單
+                  </label>
+                </div>
               </div>
             </div>
             <div className="p-4 bg-stone-100 flex gap-3">
@@ -344,31 +472,16 @@ export const ProductPanel: React.FC<ProductPanelProps> = ({
               <button onClick={() => setEditingProduct(null)}><X size={24} className="text-stone-400" /></button>
             </div>
             <div className="p-6 space-y-4 overflow-y-auto">
-              <div
-                className="w-full aspect-video bg-stone-50 border-2 border-dashed border-stone-200 rounded-2xl flex items-center justify-center cursor-pointer hover:bg-stone-100 transition-colors relative overflow-hidden"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => handleImageChange(e, true)} />
-                {editingProduct.imageUrl ? (
-                  <div className="relative w-full h-full group">
-                    <img src={(editingProduct.imageUrl && !editingProduct.imageUrl.includes('picsum.photos')) ? editingProduct.imageUrl : (editingProduct.category === '扭蛋' ? DEFAULT_GACHA_IMAGE : (editingProduct.imageUrl || 'https://picsum.photos/seed/product/200/200'))} className="w-full h-full object-contain p-2" alt={editingProduct.name} referrerPolicy="no-referrer" loading="lazy" />
-                    <button onClick={(e) => { e.stopPropagation(); const imgUrl = (editingProduct.imageUrl && !editingProduct.imageUrl.includes('picsum.photos')) ? editingProduct.imageUrl : (editingProduct.category === '扭蛋' ? DEFAULT_GACHA_IMAGE : (editingProduct.imageUrl || 'https://picsum.photos/seed/product/200/200')); setCropImageSrc(imgUrl); setCropTarget({ type: 'editProduct' }); }} className="absolute top-2 right-2 p-2 bg-white/90 text-stone-700 rounded-lg shadow-sm opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-xs font-medium hover:bg-white z-20">
-                      <Crop size={14} /> 裁切
-                    </button>
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    {editingProduct.category === '扭蛋' ? (
-                      <img src={DEFAULT_GACHA_IMAGE} className="w-full h-full object-contain p-2 opacity-50" alt="Default Gacha" referrerPolicy="no-referrer" loading="lazy" />
-                    ) : (
-                      <div className="text-center text-stone-400">
-                        <Camera size={40} className="mx-auto mb-2 opacity-50" />
-                        <p>點擊/手機選擇圖片</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+              <PhotoManager
+                images={[editingProduct.imageUrl, ...(editingProduct.imageUrls || [])].filter(Boolean) as string[]}
+                onChange={(next) => setEditingProduct({ ...editingProduct, imageUrl: next[0], imageUrls: next.slice(1) })}
+                isUrlMode={isUrlMode}
+                setIsUrlMode={setIsUrlMode}
+                imageUrlInput={imageUrlInput}
+                setImageUrlInput={setImageUrlInput}
+                onFilesSelected={e => handleImagesChange(e, true)}
+                onCropRequest={(url, idx) => { setCropImageSrc(url); setCropTarget({ type: 'editProduct', index: idx }); }}
+              />
 
               <div className="space-y-4">
                 <div>
@@ -438,6 +551,22 @@ export const ProductPanel: React.FC<ProductPanelProps> = ({
                       {settings.productCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                     </select>
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-stone-500 mb-1 ml-1">商品說明 / 尺寸表 (選填)</label>
+                  <textarea className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:ring-2 focus:ring-[#7A9E8A] text-sm min-h-[90px]" placeholder={'例如：\nS：胸圍86 腰圍64\nM：胸圍90 腰圍68'} value={editingProduct.description || ''} onChange={e => setEditingProduct({ ...editingProduct, description: e.target.value })} />
+                </div>
+
+                <div className="flex gap-4 bg-stone-50 border border-stone-200 rounded-xl p-3">
+                  <label className="flex items-center gap-2 text-sm text-stone-700 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-[#7A9E8A]" checked={editingProduct.isPublished !== false} onChange={e => setEditingProduct({ ...editingProduct, isPublished: e.target.checked })} />
+                    上架顯示在客人頁面
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-stone-700 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-[#7A9E8A]" checked={!!editingProduct.isSoldOut} onChange={e => setEditingProduct({ ...editingProduct, isSoldOut: e.target.checked })} />
+                    已結單
+                  </label>
                 </div>
               </div>
             </div>

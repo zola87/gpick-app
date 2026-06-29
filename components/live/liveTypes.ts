@@ -123,20 +123,29 @@ export interface ProductPanelProps {
   setIsAddingNewCategory: React.Dispatch<React.SetStateAction<boolean>>;
   quickCategoryName: string;
   setQuickCategoryName: React.Dispatch<React.SetStateAction<string>>;
-  imagePreview: string | null;
   isUrlMode: boolean;
   setIsUrlMode: React.Dispatch<React.SetStateAction<boolean>>;
   imageUrlInput: string;
   setImageUrlInput: React.Dispatch<React.SetStateAction<string>>;
-  fileInputRef: React.RefObject<HTMLInputElement>;
-  handleImageChange: (e: React.ChangeEvent<HTMLInputElement>, isEditing?: boolean) => void;
+  handleImagesChange: (e: React.ChangeEvent<HTMLInputElement>, isEditing?: boolean) => void;
   handleCreateProduct: () => void;
+  // photos & description
+  newProdImages: string[];
+  setNewProdImages: React.Dispatch<React.SetStateAction<string[]>>;
+  newProdDescription: string;
+  setNewProdDescription: React.Dispatch<React.SetStateAction<string>>;
+  newProdIsPublished: boolean;
+  setNewProdIsPublished: React.Dispatch<React.SetStateAction<boolean>>;
+  newProdIsSoldOut: boolean;
+  setNewProdIsSoldOut: React.Dispatch<React.SetStateAction<boolean>>;
   // location modal
   locationModalData: { locations: SourcingLocation[]; onSave: (locs: SourcingLocation[]) => void } | null;
   setLocationModalData: React.Dispatch<React.SetStateAction<{ locations: SourcingLocation[]; onSave: (locs: SourcingLocation[]) => void } | null>>;
   // crop
   setCropImageSrc: React.Dispatch<React.SetStateAction<string | null>>;
   setCropTarget: React.Dispatch<React.SetStateAction<CropTarget | null>>;
+  // bulk-update by brand (上架/下架/已結單)
+  onBulkUpdateByBrand: (brand: string, patch: Partial<Pick<Product, 'isPublished' | 'isSoldOut'>>) => void;
 }
 
 // ─── AiImagePanel props ──────────────────────────────────────────────────────

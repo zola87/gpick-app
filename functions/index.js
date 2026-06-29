@@ -11,26 +11,7 @@ const db = admin.firestore();
 const LINE_CHANNEL_ACCESS_TOKEN = defineSecret('LINE_CHANNEL_ACCESS_TOKEN');
 const LINE_CHANNEL_SECRET       = defineSecret('LINE_CHANNEL_SECRET');
 
-const ALLOWED_EMAILS    = ['19980531mg@gmail.com', 'forpin1014@gmail.com'];
-const PENDING_EXPIRY_MS = 10 * 60 * 1000;
-
-// Module-level TTL cache — avoids full collection scans on every webhook event
-let _cache = { customers: null, products: null, cachedAt: 0 };
-const CACHE_TTL_MS = 5 * 60 * 1000;
-
-async function getCachedCollections() {
-  if (Date.now() - _cache.cachedAt < CACHE_TTL_MS && _cache.customers) return _cache;
-  const [custSnap, prodSnap] = await Promise.all([
-    db.collection('customers').get(),
-    db.collection('products').get(),
-  ]);
-  _cache = {
-    customers: custSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-    products:  prodSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-    cachedAt:  Date.now(),
-  };
-  return _cache;
-}
+const ALLOWED_EMAILS = ['19980531mg@gmail.com', 'forpin1014@gmail.com'];
 
 // ── 傳送 LINE 推播（前端 onCall） ─────────────────────────────────────────────
 exports.sendLineMessage = onCall({ secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (request) => {
@@ -72,7 +53,7 @@ exports.matchCustomerByLineName = onCall(async (request) => {
     const isSimilar = nl === nd || nl.includes(nd) || nd.includes(nl) ||
                       levenshtein(nl, nd) <= threshold;
     if (isSimilar)
-      candidates.push({ id: d.id, lineName: c.lineName, communityNickname: c.communityNickname ?? null });
+      candidates.push({ id: d.id, lineName: c.lineName, nickname: c.nickname ?? null });
     if (candidates.length >= 3) break;
   }
 
@@ -92,24 +73,23 @@ exports.findCustomerMatches = onCall(async (request) => {
 
   for (const d of snap.docs) {
     const c = d.data();
-    if (c.lineUserId || !c.communityNickname) continue;
-    const nc        = normalizeStr(c.communityNickname);
+    if (c.lineUserId || !c.nickname) continue;
+    const nc        = normalizeStr(c.nickname);
     const threshold = Math.max(nc.length, nq.length) <= 4 ? 1 : 2;
     const isSimilar = nc === nq || nc.includes(nq) || nq.includes(nc) ||
                       levenshtein(nc, nq) <= threshold;
-    if (isSimilar) matches.push({ id: d.id, communityNickname: c.communityNickname });
+    if (isSimilar) matches.push({ id: d.id, nickname: c.nickname });
     if (matches.length >= 5) break;
   }
 
   return { matches };
 });
 
-// ── LINE Webhook（接收訊息） ────────────────────────────────────────────────────
+// ── LINE Webhook — 僅擷取客人回報的匯款後五碼（不做下單解析）──────────────────
 exports.lineWebhook = onRequest(
   { secrets: [LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN], invoker: 'public' },
   async (req, res) => {
     try {
-      // Verify LINE signature before processing anything
       const sig = req.headers['x-line-signature'];
       const secret = LINE_CHANNEL_SECRET.value().replace(/[^\x20-\x7E]/g, '').trim();
       const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body), 'utf8');
@@ -120,15 +100,12 @@ exports.lineWebhook = onRequest(
         return;
       }
 
-      const adminSnap = await db.doc('settings/adminLine').get();
-      const adminData = adminSnap.data() || {};
-      const adminLineUserIds = adminData.adminLineUserIds || [];
       const token = LINE_CHANNEL_ACCESS_TOKEN.value();
 
       for (const event of req.body.events || []) {
-        if (event.type !== 'message' || event.message?.type !== 'text') continue;
+        if (event.type !== 'message' && event.type !== 'postback') continue;
+        if (event.type === 'message' && event.message?.type !== 'text') continue;
 
-        // Idempotency: atomic check-and-set prevents duplicate processing on LINE retries
         const eventId = event.webhookEventId;
         if (eventId) {
           const isDup = await db.runTransaction(async tx => {
@@ -142,43 +119,52 @@ exports.lineWebhook = onRequest(
         }
 
         const senderId   = event.source?.userId;
-        const text       = event.message.text?.trim();
         const replyToken = event.replyToken;
-        if (!senderId || !text) continue;
+        if (!senderId) continue;
 
-        // !setup：任何人可觸發，需到 web 確認（5 分鐘有效期）
-        if (text === '!setup') {
-          await db.doc('settings/adminLine').set({
-            pendingLineUserId: senderId,
-            pendingLineUserIdAt: Date.now(),
-          }, { merge: true });
-          await replyLine(replyToken, '✅ 已收到綁定申請！\n請到 GPick 後台的「設定」頁面確認身份，即可啟用快速下單功能。\n\n⏰ 綁定申請 5 分鐘內有效。', token);
+        // 客人點擊「保留／不保留」快速回覆按鈕
+        if (event.type === 'postback') {
+          const data = event.postback?.data || '';
+          const m = data.match(/^carry:(keep|drop):(.+)$/);
+          if (!m) continue;
+          const [, decision, orderId] = m;
+          const orderRef = db.collection('orders').doc(orderId);
+          const orderSnap = await orderRef.get();
+          if (!orderSnap.exists) continue;
+          // 確認這筆訂單真的是按按鈕的這位客人本人的，避免任何人拿到別人的 orderId 就能亂改保留狀態
+          const orderCustSnap = await db.collection('customers').doc(orderSnap.data().customerId).get();
+          if (!orderCustSnap.exists || orderCustSnap.data().lineUserId !== senderId) continue;
+          await orderRef.update({
+            carryOverDecision: decision === 'keep' ? 'keep' : 'declined',
+            carryOverDecidedAt: Date.now(),
+          });
+          await replyLine(replyToken,
+            decision === 'keep' ? '✅ 好的，會繼續幫你保留下次連線繼續找！' : '已收到，這項就不保留了，謝謝你的回覆 🙏',
+            token);
           continue;
         }
 
-        if (!adminLineUserIds.includes(senderId)) continue;
+        const text = event.message.text?.trim();
+        if (!text) continue;
 
-        if (text === '取消') {
-          await db.doc('settings/adminLine').update({
-            pendingOrder: admin.firestore.FieldValue.delete(),
-          });
-          await replyLine(replyToken, '❌ 已取消', token);
-          continue;
-        }
+        // 比對「不被其他數字包夾的 5 個連續數字」，例如「後五碼 12345」「12345」
+        const match = text.match(/(?<!\d)\d{5}(?!\d)/);
+        if (!match) continue;
 
-        const pending = adminData.pendingOrder;
-        if (pending && pending.adminUserId === senderId && Date.now() < pending.expiresAt) {
-          const num = parseInt(text, 10);
-          if (!isNaN(num) && num > 0) {
-            await handleSelection(senderId, num, replyToken, token, pending);
-            continue;
-          }
-          await db.doc('settings/adminLine').update({
-            pendingOrder: admin.firestore.FieldValue.delete(),
-          });
-        }
+        const custSnap = await db.collection('customers').where('lineUserId', '==', senderId).limit(1).get();
+        if (custSnap.empty) continue;
 
-        await handleOrderMessage(senderId, text, replyToken, token);
+        const customerDoc = custSnap.docs[0];
+        // 已經被後台確認收到匯款的，不要再讓任何巧合的5碼文字（電話、運單號等）把確認狀態打回去
+        if (customerDoc.data().paymentConfirmed) continue;
+
+        await customerDoc.ref.update({
+          lastFiveDigits: match[0],
+          paymentReportedAt: Date.now(),
+          paymentConfirmed: false,
+        });
+
+        await replyLine(replyToken, `✅ 已收到您的匯款回報（後五碼 ${match[0]}）\n主購確認入帳後會再通知您 💌`, token);
       }
     } catch (e) {
       logger.error('webhook error', e);
@@ -187,281 +173,139 @@ exports.lineWebhook = onRequest(
   }
 );
 
-// ── 解析並處理新訂單訊息 ──────────────────────────────────────────────────────
-async function handleOrderMessage(senderId, text, replyToken, token) {
-  const lines  = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const orders = parseOrderLines(lines);
+// ── 後台確認收到匯款 → 寫入確認狀態並推播賣貨便連結給客人 ─────────────────────
+exports.confirmPaymentReceived = onCall({ secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (request) => {
+  const email = request.auth?.token?.email;
+  if (!email || !ALLOWED_EMAILS.includes(email))
+    throw new HttpsError('permission-denied', '只有管理員才能確認收款');
 
-  if (orders.length === 0) {
-    await replyLine(replyToken,
-      '❓ 格式不符，範例：\nAmy 龍角散抹茶 2\n\n或多項：\nAmy\n龍角散抹茶 2\nEVE白盒 3', token);
-    return;
+  const { customerId } = request.data || {};
+  if (!customerId) throw new HttpsError('invalid-argument', '缺少 customerId');
+
+  const customerRef = db.collection('customers').doc(customerId);
+  const snap = await customerRef.get();
+  if (!snap.exists) throw new HttpsError('not-found', '找不到此客人');
+  const customer = snap.data();
+
+  await customerRef.update({ paymentConfirmed: true, paymentConfirmedAt: Date.now() });
+
+  if (customer.lineUserId) {
+    const settingsSnap = await db.doc('settings/public').get();
+    const settings = settingsSnap.data() || {};
+    const link = settings.shopeeOrderLink
+      ? `\n\n📦 賣貨便下單連結：\n${settings.shopeeOrderLink}`
+      : '';
+    const text = `✅ 已確認收到您的匯款，謝謝你！${link}\n\n有任何問題都可以隨時找我 💌`;
+    try {
+      await linePost('/v2/bot/message/push',
+        { to: customer.lineUserId, messages: [{ type: 'text', text }] },
+        LINE_CHANNEL_ACCESS_TOKEN.value(), false);
+    } catch (e) {
+      logger.error('confirmPaymentReceived push failed', e);
+    }
   }
 
-  const { customers, products } = await getCachedCollections();
+  return { success: true };
+});
 
-  const customerQuery      = orders[0].customerQuery;
-  const customerCandidates = findCustomerCandidates(customerQuery, customers);
+// ── 後台開放結帳 → 推播本場已買到清單給所有已連結 LINE 的客人 ─────────────────
+exports.broadcastCheckoutOpen = onCall({ secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (request) => {
+  const email = request.auth?.token?.email;
+  if (!email || !ALLOWED_EMAILS.includes(email))
+    throw new HttpsError('permission-denied', '只有管理員才能推播通知');
 
-  if (customerCandidates.length === 0) {
-    await replyLine(replyToken, `找不到客人「${customerQuery}」`, token);
-    return;
+  const token = LINE_CHANNEL_ACCESS_TOKEN.value();
+  const settingsSnap = await db.doc('settings/public').get();
+  const settings = settingsSnap.data() || {};
+  const sessionName = settings.sessionName || '本次連線';
+
+  const [custSnap, prodSnap, ordSnap] = await Promise.all([
+    db.collection('customers').get(),
+    db.collection('products').get(),
+    db.collection('orders').where('isArchived', '==', false).get(),
+  ]);
+  const products  = new Map(prodSnap.docs.map(d => [d.id, d.data()]));
+  const customers = new Map(custSnap.docs.map(d => [d.id, d.data()]));
+
+  const byCustomer = new Map();
+  for (const d of ordSnap.docs) {
+    const o = d.data();
+    const customer = customers.get(o.customerId);
+    if (!customer?.lineUserId || customer.isStock) continue;
+    if (!byCustomer.has(o.customerId)) byCustomer.set(o.customerId, []);
+    byCustomer.get(o.customerId).push(o);
   }
 
-  if (customerCandidates.length > 1) {
-    const list = customerCandidates.map((c, i) =>
-      `${numEmoji(i + 1)} ${c.communityNickname || c.lineName}`).join('\n');
-    await savePending(senderId, {
-      step: 'awaitCustomerSelection',
-      customerCandidates: customerCandidates.map(c => ({
-        id: c.id, name: c.communityNickname || c.lineName,
-      })),
-      pendingProductItems: orders.map(o => ({ productQuery: o.productQuery, quantity: o.quantity })),
-      confirmedOrders: [],
-      errors: [],
-    });
-    await replyLine(replyToken,
-      `找到多位相符客人：\n${list}\n\n請回覆數字選擇，或傳「取消」放棄`, token);
-    return;
-  }
+  const lineFor = (o) => {
+    const p = products.get(o.productId);
+    const variantPart = o.variant ? `（${o.variant}）` : '';
+    return `${p?.name ?? '商品'}${variantPart} × ${o.quantityBought || o.quantity}`;
+  };
+  const carryQuickReply = (orderId) => ({
+    items: [
+      { type: 'action', action: { type: 'postback', label: '✅ 保留', data: `carry:keep:${orderId}`, displayText: '保留到下次連線' } },
+      { type: 'action', action: { type: 'postback', label: '❌ 不保留', data: `carry:drop:${orderId}`, displayText: '不保留了，謝謝' } },
+    ],
+  });
+  const chunk = (arr, size) => { const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; };
 
-  await processProductItems(
-    senderId, customerCandidates[0],
-    orders.map(o => ({ productQuery: o.productQuery, quantity: o.quantity })),
-    products, [], [], replyToken, token,
-  );
-}
+  // 每位客人的推播彼此獨立，平行發送——逐個 await 在客人數一多時會把整支函式拖到逼近逾時
+  const pushToCustomer = async ([customerId, orders]) => {
+    const customer = customers.get(customerId);
+    const bought = orders.filter(o => o.quantityBought > 0);
+    const notFound = orders.filter(o => o.quantityBought === 0 && !o.carryOverDecision);
+    if (bought.length === 0 && notFound.length === 0) return false;
 
-// ── 逐一處理商品項目，遇到多個候選時暫停等待選擇 ─────────────────────────────
-async function processProductItems(senderId, customer, items, products, confirmedOrders, errors, replyToken, token) {
-  const remaining = [...items];
-
-  while (remaining.length > 0) {
-    const item       = remaining.shift();
-    const candidates = findProductCandidates(item.productQuery, products);
-
-    if (candidates.length === 0) {
-      errors.push(`找不到商品「${item.productQuery}」`);
-      continue;
-    }
-
-    if (candidates.length > 1) {
-      const list = candidates.map((p, i) =>
-        `${numEmoji(i + 1)} ${p.product.name}${p.variant ? `（${p.variant}）` : ''}`).join('\n');
-      await savePending(senderId, {
-        step: 'awaitProductSelection',
-        resolvedCustomerId:   customer.id,
-        resolvedCustomerName: customer.communityNickname || customer.lineName,
-        productCandidates: candidates.map(p => ({
-          productId: p.product.id, name: p.product.name, variant: p.variant,
-        })),
-        currentItemQuantity:   item.quantity,
-        remainingProductItems: remaining,
-        confirmedOrders,
-        errors,
-      });
-      await replyLine(replyToken,
-        `找到多個相符商品：\n${list}\n\n請回覆數字選擇，或傳「取消」放棄`, token);
-      return;
-    }
-
-    const match = candidates[0];
-    if (match.product.variants?.length > 0 && !match.variant) {
-      errors.push(
-        `❓「${match.product.name}」有以下款式，請補充後重傳：\n` +
-        match.product.variants.map((v, i) => `${i + 1}. ${v}`).join('\n')
-      );
-      continue;
-    }
-
-    confirmedOrders.push({
-      customerId:   customer.id,
-      customerName: customer.communityNickname || customer.lineName,
-      productId:    match.product.id,
-      productName:  match.product.name,
-      variant:      match.variant || null,
-      quantity:     item.quantity,
-    });
-  }
-
-  await finalizeOrders(confirmedOrders, errors, replyToken, token);
-}
-
-// ── 處理管理員的選擇數字 ──────────────────────────────────────────────────────
-async function handleSelection(senderId, num, replyToken, token, pending) {
-  if (pending.step === 'awaitCustomerSelection') {
-    const candidates = pending.customerCandidates;
-    if (num < 1 || num > candidates.length) {
-      await replyLine(replyToken, `請回覆 1 到 ${candidates.length} 之間的數字`, token);
-      return;
-    }
-    const selected         = candidates[num - 1];
-    const { products }     = await getCachedCollections();
-    await processProductItems(
-      senderId,
-      { id: selected.id, communityNickname: selected.name, lineName: selected.name },
-      pending.pendingProductItems, products,
-      pending.confirmedOrders || [], pending.errors || [],
-      replyToken, token,
-    );
-
-  } else if (pending.step === 'awaitProductSelection') {
-    const candidates = pending.productCandidates;
-    if (num < 1 || num > candidates.length) {
-      await replyLine(replyToken, `請回覆 1 到 ${candidates.length} 之間的數字`, token);
-      return;
-    }
-    const selected     = candidates[num - 1];
-    const newConfirmed = [
-      ...(pending.confirmedOrders || []),
-      {
-        customerId:   pending.resolvedCustomerId,
-        customerName: pending.resolvedCustomerName,
-        productId:    selected.productId,
-        productName:  selected.name,
-        variant:      selected.variant,
-        quantity:     pending.currentItemQuantity,
-      },
-    ];
-
-    if (pending.remainingProductItems?.length > 0) {
-      const { products } = await getCachedCollections();
-      await processProductItems(
-        senderId,
-        { id: pending.resolvedCustomerId, communityNickname: pending.resolvedCustomerName, lineName: pending.resolvedCustomerName },
-        pending.remainingProductItems, products,
-        newConfirmed, pending.errors || [],
-        replyToken, token,
-      );
+    let summary = `【${sessionName}】結帳通知\n\n`;
+    if (bought.length > 0) {
+      const bank = pickBankAccountFor(customerId, customer.preferredBankId, settings.bankAccounts);
+      const bankText = bank ? `${bank.label} ${bank.account}` : '請聯繫主購取得匯款帳號';
+      summary += `✅ 已買到：\n${bought.map(o => `✓ ${lineFor(o)}`).join('\n')}\n\n`;
+      summary += `🏦 匯款帳號：${bankText}\n\n匯款後麻煩回傳帳號後五碼給我，確認入帳後會通知你賣貨便下單連結💌`;
     } else {
-      await finalizeOrders(newConfirmed, pending.errors || [], replyToken, token);
+      summary += `這次有些商品還沒買到，請看下面訊息確認是否保留到下次連線喔！`;
     }
-  }
-}
 
-// ── 建立訂單並回覆確認 ────────────────────────────────────────────────────────
-async function finalizeOrders(confirmedOrders, errors, replyToken, token) {
-  await db.doc('settings/adminLine').update({
-    pendingOrder: admin.firestore.FieldValue.delete(),
+    // 第一則：總結（已買到清單＋匯款資訊）
+    await linePost('/v2/bot/message/push', { to: customer.lineUserId, messages: [{ type: 'text', text: summary }] }, token, false);
+
+    // 沒買到的每一項，各自附上「保留／不保留」快速回覆按鈕（一次最多 5 則訊息，故分批送）
+    for (const group of chunk(notFound, 5)) {
+      const messages = group.map(o => ({
+        type: 'text',
+        text: `❓ 沒買到：${lineFor(o)}\n要保留到下次連線繼續幫你找嗎？`,
+        quickReply: carryQuickReply(o.id),
+      }));
+      await linePost('/v2/bot/message/push', { to: customer.lineUserId, messages }, token, false);
+    }
+    return true;
+  };
+
+  const entries = Array.from(byCustomer);
+  const results = await Promise.allSettled(entries.map(pushToCustomer));
+  let sent = 0;
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled' && r.value) sent++;
+    else if (r.status === 'rejected') logger.error(`broadcast push failed for ${entries[i][0]}`, r.reason);
   });
 
-  if (confirmedOrders.length > 0) {
-    const batch = db.batch();
-    for (const o of confirmedOrders) {
-      const ref = db.collection('orders').doc();
-      batch.set(ref, {
-        id: ref.id, productId: o.productId, variant: o.variant || null,
-        customerId: o.customerId, quantity: o.quantity, quantityBought: 0,
-        status: 'PENDING', notificationStatus: 'UNNOTIFIED',
-        isArchived: false, timestamp: Date.now(),
-      });
-    }
-    await batch.commit();
-  }
-
-  let reply = '';
-  if (confirmedOrders.length > 0) {
-    reply += `✅ 已建立訂單\n${confirmedOrders.map(o =>
-      `${o.customerName}｜${o.productName}${o.variant ? `（${o.variant}）` : ''} x${o.quantity}`
-    ).join('\n')}`;
-  }
-  if (errors.length > 0) reply += `${reply ? '\n\n' : ''}⚠️ 以下無法建立：\n${errors.join('\n')}`;
-  if (!reply) reply = '⚠️ 沒有成功建立任何訂單';
-
-  await replyLine(replyToken, reply, token);
-}
-
-// ── 儲存待確認狀態 ────────────────────────────────────────────────────────────
-async function savePending(senderId, data) {
-  await db.doc('settings/adminLine').set({
-    pendingOrder: { ...data, adminUserId: senderId, expiresAt: Date.now() + PENDING_EXPIRY_MS },
-  }, { merge: true });
-}
-
-// ── 解析訊息行 ────────────────────────────────────────────────────────────────
-function parseOrderLines(lines) {
-  const orders = [];
-  let currentCustomer = null;
-
-  for (const line of lines) {
-    const tokens    = line.split(/\s+/);
-    const lastToken = tokens[tokens.length - 1];
-    const qty       = parseInt(lastToken, 10);
-
-    if (!isNaN(qty) && qty > 0 && tokens.length >= 2) {
-      if (currentCustomer) {
-        orders.push({ customerQuery: currentCustomer, productQuery: tokens.slice(0, -1).join(' '), quantity: qty });
-      } else if (tokens.length >= 3) {
-        const [customerQuery, ...productParts] = tokens.slice(0, -1);
-        orders.push({ customerQuery, productQuery: productParts.join(' '), quantity: qty });
-      }
-    } else {
-      currentCustomer = line;
-    }
-  }
-  return orders;
-}
-
-// ── 客人模糊比對（有優先順序）────────────────────────────────────────────────
-function findCustomerCandidates(query, customers) {
-  const nq = normalizeStr(query);
-  if (!nq) return [];
-
-  const scored = [];
-  for (const c of customers) {
-    const nn = normalizeStr(c.communityNickname || '');
-    const nl = normalizeStr(c.lineName || '');
-    let score = -1;
-    if (nn === nq || nl === nq)                               score = 3;
-    else if (nn.startsWith(nq) || nl.startsWith(nq))         score = 2;
-    else if (nn.includes(nq)   || nl.includes(nq))           score = 1;
-    else if ((nn && levenshtein(nn, nq) <= 1) ||
-             (nl && levenshtein(nl, nq) <= 1))                score = 0;
-    if (score >= 0) scored.push({ customer: c, score });
-  }
-
-  scored.sort((a, b) => b.score - a.score);
-  if (scored.length === 0) return [];
-  const topScore = scored[0].score;
-  if (topScore === 3) return scored.filter(s => s.score === 3).map(s => s.customer);
-  return scored.filter(s => s.score === topScore).map(s => s.customer);
-}
-
-// ── 商品模糊比對 ──────────────────────────────────────────────────────────────
-function findProductCandidates(query, products) {
-  const nq = normalizeStr(query);
-  if (!nq) return [];
-
-  const scored = [];
-  for (const product of products) {
-    const np       = normalizeStr(product.name);
-    const variants = product.variants || [];
-    let matchedVariant = null;
-    for (const v of variants) {
-      const nv = normalizeStr(v);
-      if (nv && nq.includes(nv)) { matchedVariant = v; break; }
-    }
-    const queryBase = matchedVariant
-      ? normalizeStr(nq.replace(normalizeStr(matchedVariant), ''))
-      : nq;
-
-    let score = -1;
-    if (np === nq || (queryBase && np === queryBase))                     score = 3;
-    else if (np.includes(nq) || (queryBase && np.includes(queryBase)))   score = 2;
-    else if (nq.includes(np) && np.length >= 2)                          score = 2;
-    else if (np.length >= 2 && nq.length >= 2 && levenshtein(np, nq) <= 1) score = 1;
-
-    if (score >= 0) scored.push({ product, variant: matchedVariant, score });
-  }
-
-  scored.sort((a, b) => b.score - a.score);
-  if (scored.length === 0) return [];
-  const topScore = scored[0].score;
-  if (topScore === 3) return scored.filter(s => s.score === 3);
-  return scored.filter(s => s.score === topScore);
-}
+  return { success: true, sent };
+});
 
 // ── 字串正規化 ────────────────────────────────────────────────────────────────
+// 同一套邏輯也存在於 services/firebaseService.ts（前端用），Cloud Functions 是獨立的
+// Node 程式碼庫沒辦法直接 import 前端模組，所以這裡留一份一樣的——改動時兩邊要一起改。
+function pickBankAccountFor(customerId, preferredBankId, accounts) {
+  if (!accounts || accounts.length === 0) return undefined;
+  if (preferredBankId) {
+    const preferred = accounts.find(a => a.id === preferredBankId);
+    if (preferred) return preferred;
+  }
+  let hash = 0;
+  for (let i = 0; i < customerId.length; i++) hash = (hash * 31 + customerId.charCodeAt(i)) >>> 0;
+  return accounts[hash % accounts.length];
+}
+
 function normalizeStr(s) {
   return (s || '').trim().toLowerCase().replace(/\s+/g, '');
 }
@@ -518,8 +362,4 @@ async function replyLine(replyToken, text, token) {
   } catch (e) {
     logger.error('replyLine failed', e);
   }
-}
-
-function numEmoji(n) {
-  return (['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣'])[n - 1] || `${n}.`;
 }

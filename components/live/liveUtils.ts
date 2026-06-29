@@ -5,6 +5,8 @@ export const generateId = () => {
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 };
 
+export const MAX_PRODUCT_IMAGES = 10;
+
 export const DEFAULT_GACHA_IMAGE =
   'https://cdn.phototourl.com/free/2026-03-25-d705f2ce-ec34-4ce9-9cc9-ffcee8b972b9.jpg';
 

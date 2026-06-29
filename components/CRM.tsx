@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Customer, Order, Product, GlobalSettings } from '../types';
 import { showAlert } from '../App';
-import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, MessageCircle, ExternalLink, Trash2, StickyNote, Award, Crown, Sprout, Skull, History, Plus, UserPlus, Package, ShoppingCart, Check, CreditCard, AlignLeft } from 'lucide-react';
+import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, Trash2, StickyNote, Award, Crown, Sprout, Skull, History, Plus, UserPlus, Package, ShoppingCart, Check, CreditCard, AlignLeft } from 'lucide-react';
 
 interface CRMProps {
   customers: Customer[];
@@ -317,6 +317,17 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
                                   {levelInfo.icon}
                                   {levelInfo.label}
                               </div>
+                              {/* LINE Linked Badge */}
+                              {customer.lineUserId ? (
+                                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-medium whitespace-nowrap bg-[#e8f8ee] text-[#06C755] border-[#06C755]/30">
+                                      <Check size={12} />
+                                      LINE 已連結
+                                  </div>
+                              ) : (
+                                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-medium whitespace-nowrap bg-stone-50 text-stone-400 border-stone-200">
+                                      LINE 未連結
+                                  </div>
+                              )}
                               {/* Blacklist Badge */}
                               {customer.isBlacklisted && (
                                   <div className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-medium whitespace-nowrap bg-stone-800 text-white border-stone-900">
@@ -330,11 +341,6 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
                   </div>
                 </div>
                 <div className="flex gap-2 items-center flex-shrink-0 ml-2">
-                  {customer.chatUrl && !isEditing && (
-                      <a href={customer.chatUrl} target="_blank" rel="noreferrer" className="text-xs bg-[#06C755] text-white px-2 py-1 rounded-full flex items-center gap-1 hover:bg-[#05b34c]">
-                          <MessageCircle size={12}/>
-                      </a>
-                  )}
                   <button onClick={() => toggleExpand(customer.id)} className="text-stone-400 hover:text-stone-600">
                       {isExpanded ? <ChevronUp size={20}/> : <ChevronDown size={20}/>}
                   </button>
@@ -455,25 +461,7 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
                     
                     {/* PRIMARY INFO (Always Visible) */}
                     <div className="space-y-3 pt-2">
-                        {/* 1. Chat Link */}
-                        <div className="flex items-center gap-2 text-stone-600">
-                            <div className="w-6 flex justify-center"><MessageCircle size={14} className="text-stone-400" /></div>
-                            {isEditing ? (
-                                <input 
-                                className="flex-1 border rounded px-2 py-1 text-sm bg-white focus:ring-1 focus:ring-[#7A9E8A]" 
-                                placeholder="貼上 LINE 聊天室連結 (https://...)" 
-                                value={editForm.chatUrl || ''} 
-                                onChange={e => setEditForm({...editForm, chatUrl: e.target.value})} 
-                                />
-                            ) : (
-                                customer.chatUrl ? 
-                                <a href={customer.chatUrl} target="_blank" rel="noreferrer" className="text-[#2C2926] flex items-center gap-1 hover:underline text-sm font-medium">
-                                    開啟 LINE 聊天室 <ExternalLink size={12}/>
-                                </a> : <span className="text-stone-300 text-xs italic">未設定連結</span>
-                            )}
-                        </div>
-
-                        {/* 2. Note */}
+                        {/* Note */}
                         <div className="flex items-start gap-2 text-stone-600">
                             <div className="w-6 flex justify-center mt-1"><StickyNote size={14} className="text-stone-400" /></div>
                             {isEditing ? (
@@ -520,6 +508,22 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
                                 <span className="text-xs text-stone-400 w-12">帳號:</span>
                                 <input className="flex-1 border rounded px-2 py-1 text-sm bg-white" value={editForm.lastFiveDigits || ''} onChange={e => setEditForm({...editForm, lastFiveDigits: e.target.value})} placeholder="匯款後五碼"/>
                             </div>
+                            {(settings.bankAccounts || []).length > 0 && (
+                                <div className="flex items-center gap-2 text-stone-600">
+                                    <div className="w-6 flex justify-center"><CreditCard size={14} className="text-stone-400" /></div>
+                                    <span className="text-xs text-stone-400 w-12">指定行:</span>
+                                    <select
+                                        className="flex-1 border rounded px-2 py-1 text-sm bg-white"
+                                        value={editForm.preferredBankId || ''}
+                                        onChange={e => setEditForm({ ...editForm, preferredBankId: e.target.value || undefined })}
+                                    >
+                                        <option value="">自動分配（預設）</option>
+                                        {(settings.bankAccounts || []).map(b => (
+                                            <option key={b.id} value={b.id}>{b.label}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <details className="group border border-stone-100 rounded-lg bg-stone-50 overflow-hidden mt-3 transition-all">
@@ -548,6 +552,14 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
                                     <span className="text-stone-400 w-16 flex-shrink-0">後五碼:</span>
                                     <span className="font-medium text-stone-800 select-all">{customer.lastFiveDigits || '-'}</span>
                                 </div>
+                                {(settings.bankAccounts || []).length > 0 && (
+                                    <div className="flex gap-2">
+                                        <span className="text-stone-400 w-16 flex-shrink-0">指定行:</span>
+                                        <span className="font-medium text-stone-800">
+                                            {settings.bankAccounts!.find(b => b.id === customer.preferredBankId)?.label || '自動分配'}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                         </details>
                     )}

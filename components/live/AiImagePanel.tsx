@@ -123,19 +123,29 @@ export const AiImagePanel: React.FC<AiImagePanelProps> = ({
     }
   };
 
-  const handleCreateGacha = (customersList: GachaCustomerItem[], selectedIndices: number[]) => {
+  const handleCreateGacha = async (customersList: GachaCustomerItem[], selectedIndices: number[]) => {
     const validCustomers = customersList.filter(c => c.name.trim() !== '' && c.qty > 0);
     if (selectedIndices.length === 0) { showAlert('請選擇至少一款扭蛋'); return; }
 
-    selectedIndices.forEach(idx => {
+    for (const idx of selectedIndices) {
       const gacha = gachaResults[idx];
-      if (!gacha) return;
+      if (!gacha) continue;
 
       const productId = generateId();
+      const rawImage = gacha.image || gachaImage || DEFAULT_GACHA_IMAGE;
+      // Upload to Storage instead of saving the raw base64 straight into the
+      // product document — keeps Firestore reads fast as the catalog grows.
+      let imageUrl = rawImage;
+      if (rawImage.startsWith('data:')) {
+        try {
+          const { uploadProductImage } = await import('../../services/firebaseService');
+          imageUrl = await uploadProductImage(rawImage);
+        } catch (e) { console.error('Gacha image upload failed', e); }
+      }
       const newProduct: Product = {
         id: productId, name: gacha.name, brand: '', sourcingLocations: [],
         priceJPY: gacha.priceJPY, priceTWD: gacha.priceTWD, category: '扭蛋',
-        variants: [], imageUrl: gacha.image || gachaImage || DEFAULT_GACHA_IMAGE,
+        variants: [], imageUrl, isPublished: false,
         createdAt: Date.now()
       };
 
@@ -159,7 +169,7 @@ export const AiImagePanel: React.FC<AiImagePanelProps> = ({
           variant: '', keepShell: custData.keepShell
         }, newCustomer);
       });
-    });
+    }
 
     showAlert('扭蛋建檔與喊單成功！');
     setIsGachaModalOpen(false);

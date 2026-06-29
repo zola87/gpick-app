@@ -5,7 +5,13 @@
     <meta charset="UTF-8" />
     <!-- CHANGED: Added maximum-scale=1.0, user-scalable=no to prevent iOS zooming on input focus -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>GPick 賺錢工具</title>
+    <title>GPick代購</title>
+    <!-- 分享連結到 LINE/社群時，這幾個標籤決定預覽卡片顯示什麼。og:image 故意指到一張
+         素色佔位圖（不是網站圖示），這樣 LINE 不會去抓網站圖示當縮圖——等之後 logo 做好了，
+         直接把這行換成正式 logo 圖片網址即可，其他都不用動。 -->
+    <meta property="og:title" content="GPick代購" />
+    <meta property="og:description" content="日本代購／海外連線購物，瀏覽商品、追蹤訂單進度" />
+    <meta property="og:image" content="https://gpick-cloud.web.app/og-placeholder.png" />
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/2953/2953363.png" />
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2953/2953363.png" />
     <!-- CHANGED: Use absolute path /manifest.json to fix Vercel PWA 404 issues -->

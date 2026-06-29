@@ -10,12 +10,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Product, Customer, Order, GlobalSettings, SourcingLocation } from '../types';
 import { showAlert } from '../App';
 import { compressImage } from '../utils/imageUtils';
+import { uploadProductImage } from '../services/firebaseService';
 import ImageCropperModal from './ImageCropperModal';
 
 import { OrderInputPanel }  from './live/OrderInputPanel';
 import { ProductPanel }     from './live/ProductPanel';
 import { AiImagePanel }     from './live/AiImagePanel';
-import { generateId, DEFAULT_GACHA_IMAGE } from './live/liveUtils';
+import { generateId, DEFAULT_GACHA_IMAGE, MAX_PRODUCT_IMAGES } from './live/liveUtils';
 import {
   CropTarget,
   CustomerBatchOrderItem,
@@ -39,7 +40,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
   onAddProduct, onUpdateProduct, onDeleteProduct, onAddOrder, onUpdateSettings,
 }) => {
   const topRef      = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Add-product form ──────────────────────────────────────────────────────
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
@@ -54,9 +54,15 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
   const [newProdVariantCosts,  setNewProdVariantCosts]  = useState<Record<string, number>>({});
   const [isVariantSettingsOpen, setIsVariantSettingsOpen] = useState(false);
   const [isEditingVariantSettingsOpen, setIsEditingVariantSettingsOpen] = useState(false);
-  const [imagePreview,  setImagePreview]  = useState<string | null>(null);
+  const [newProdImages, setNewProdImages] = useState<string[]>([]); // up to MAX_PRODUCT_IMAGES; first = cover
   const [isUrlMode,     setIsUrlMode]     = useState(false);
   const [imageUrlInput, setImageUrlInput] = useState('');
+  const [newProdDescription, setNewProdDescription] = useState('');
+  // Default to unpublished — at a live session we often need to record an order fast
+  // with incomplete product info, and only flip this on once the listing is actually
+  // ready to show customers.
+  const [newProdIsPublished, setNewProdIsPublished] = useState(false);
+  const [newProdIsSoldOut,   setNewProdIsSoldOut]   = useState(false);
   const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
   const [quickCategoryName,   setQuickCategoryName]   = useState('');
 
@@ -109,10 +115,38 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
     }
   }, [newProdJPY, settings]);
 
+  // Default to camera/album mode whenever the add-product modal is (re)opened
+  useEffect(() => {
+    if (isAddProductOpen) { setIsUrlMode(false); setImageUrlInput(''); }
+  }, [isAddProductOpen]);
+
   // ── Handlers ──────────────────────────────────────────────────────────────
-  const handleCropComplete = (croppedImageBase64: string) => {
-    if      (cropTarget?.type === 'newProduct')  { setImagePreview(croppedImageBase64); }
-    else if (cropTarget?.type === 'editProduct' && editingProduct) { setEditingProduct({ ...editingProduct, imageUrl: croppedImageBase64 }); }
+  const handleCropComplete = async (croppedImageBase64: string) => {
+    if (cropTarget?.type === 'newProduct' && cropTarget.index !== undefined) {
+      const index = cropTarget.index;
+      setCropImageSrc(null);
+      setCropTarget(null);
+      try {
+        const url = await uploadProductImage(croppedImageBase64);
+        setNewProdImages(prev => { const next = [...prev]; next[index] = url; return next; });
+      } catch { showAlert('圖片上傳失敗'); }
+      return;
+    }
+    else if (cropTarget?.type === 'editProduct' && cropTarget.index !== undefined) {
+      const index = cropTarget.index;
+      setCropImageSrc(null);
+      setCropTarget(null);
+      try {
+        const url = await uploadProductImage(croppedImageBase64);
+        setEditingProduct(prev => {
+          if (!prev) return prev;
+          const combined = [prev.imageUrl, ...(prev.imageUrls || [])].filter(Boolean) as string[];
+          combined[index] = url;
+          return { ...prev, imageUrl: combined[0], imageUrls: combined.slice(1) };
+        });
+      } catch { showAlert('圖片上傳失敗'); }
+      return;
+    }
     else if (cropTarget?.type === 'gacha')       { setGachaImage(croppedImageBase64); }
     else if (cropTarget?.type === 'gachaResult' && cropTarget.index !== undefined) {
       const nr = [...gachaResults];
@@ -123,15 +157,31 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
     setCropTarget(null);
   };
 
-  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>, isEdit = false) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const compressed = await compressImage(file);
-        if (isEdit && editingProduct) setEditingProduct({ ...editingProduct, imageUrl: compressed });
-        else setImagePreview(compressed);
-      } catch { showAlert('圖片處理失敗'); }
-    }
+  const handleImagesChange = async (e: React.ChangeEvent<HTMLInputElement>, isEdit = false) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const fileList = Array.from(files);
+    try {
+      if (isEdit) {
+        if (!editingProduct) return;
+        const current = [editingProduct.imageUrl, ...(editingProduct.imageUrls || [])].filter(Boolean) as string[];
+        const room = MAX_PRODUCT_IMAGES - current.length;
+        if (room <= 0) { showAlert(`最多上傳 ${MAX_PRODUCT_IMAGES} 張照片`); return; }
+        const urls = await Promise.all(fileList.slice(0, room).map(async f => uploadProductImage(await compressImage(f))));
+        setEditingProduct(prev => {
+          if (!prev) return prev;
+          const cur = [prev.imageUrl, ...(prev.imageUrls || [])].filter(Boolean) as string[];
+          const combined = [...cur, ...urls].slice(0, MAX_PRODUCT_IMAGES);
+          return { ...prev, imageUrl: combined[0], imageUrls: combined.slice(1) };
+        });
+      } else {
+        const room = MAX_PRODUCT_IMAGES - newProdImages.length;
+        if (room <= 0) { showAlert(`最多上傳 ${MAX_PRODUCT_IMAGES} 張照片`); return; }
+        const urls = await Promise.all(fileList.slice(0, room).map(async f => uploadProductImage(await compressImage(f))));
+        setNewProdImages(prev => [...prev, ...urls].slice(0, MAX_PRODUCT_IMAGES));
+      }
+    } catch { showAlert('圖片處理失敗'); }
+    e.target.value = '';
   };
 
   const handleCreateProduct = () => {
@@ -156,15 +206,27 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
       variants:         parsedVariants,
       variantPrices:    hasVariantPrices ? cleanedVariantPrices : undefined,
       variantCosts:     Object.keys(cleanedVariantCosts).length > 0 ? cleanedVariantCosts : undefined,
-      imageUrl:         isUrlMode ? imageUrlInput : (imagePreview || (newProdCategory === '扭蛋' ? DEFAULT_GACHA_IMAGE : `https://picsum.photos/200?random=${Math.random()}`)),
+      imageUrl:         newProdImages[0] || (newProdCategory === '扭蛋' ? DEFAULT_GACHA_IMAGE : `https://picsum.photos/200?random=${Math.random()}`),
+      imageUrls:        newProdImages.slice(1),
+      description:      newProdDescription.trim() || undefined,
+      isPublished:      newProdIsPublished,
+      isSoldOut:        newProdIsSoldOut,
       createdAt:        Date.now(),
     };
     onAddProduct(newProduct);
     setIsAddProductOpen(false);
-    setImagePreview(null);
     setNewProdName(''); setNewProdBrand(''); setNewProdLocations([]);
     setNewProdVariants(''); setNewProdVariantPrices({}); setNewProdVariantCosts({});
     setNewProdJPY(''); setNewProdTWD('');
+    setNewProdImages([]); setNewProdDescription(''); setImageUrlInput('');
+    setNewProdIsPublished(false); setNewProdIsSoldOut(false);
+  };
+
+  // ── Bulk-update all products under one brand (上架/下架/已結單) ─────────────
+  const handleBulkUpdateByBrand = (brand: string, patch: Partial<Pick<Product, 'isPublished' | 'isSoldOut'>>) => {
+    const matched = products.filter(p => p.brand === brand);
+    matched.forEach(p => onUpdateProduct({ ...p, ...patch }));
+    showAlert(matched.length > 0 ? `已更新 ${matched.length} 個商品` : '這個品牌目前沒有商品');
   };
 
   // ── Filtered product list ─────────────────────────────────────────────────
@@ -211,6 +273,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
           onUpdateProduct={onUpdateProduct}
           onDeleteProduct={onDeleteProduct}
           onUpdateSettings={onUpdateSettings}
+          onBulkUpdateByBrand={handleBulkUpdateByBrand}
           orderMode={orderMode}
           setSelectedProduct={setSelectedProduct}
           setProductSearchTerm={setProductSearchTerm}
@@ -235,12 +298,14 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
           isVariantSettingsOpen={isVariantSettingsOpen} setIsVariantSettingsOpen={setIsVariantSettingsOpen}
           isAddingNewCategory={isAddingNewCategory}   setIsAddingNewCategory={setIsAddingNewCategory}
           quickCategoryName={quickCategoryName}       setQuickCategoryName={setQuickCategoryName}
-          imagePreview={imagePreview}
+          newProdImages={newProdImages}               setNewProdImages={setNewProdImages}
           isUrlMode={isUrlMode}                       setIsUrlMode={setIsUrlMode}
           imageUrlInput={imageUrlInput}               setImageUrlInput={setImageUrlInput}
-          fileInputRef={fileInputRef}
-          handleImageChange={handleImageChange}
+          handleImagesChange={handleImagesChange}
           handleCreateProduct={handleCreateProduct}
+          newProdDescription={newProdDescription}     setNewProdDescription={setNewProdDescription}
+          newProdIsPublished={newProdIsPublished}     setNewProdIsPublished={setNewProdIsPublished}
+          newProdIsSoldOut={newProdIsSoldOut}         setNewProdIsSoldOut={setNewProdIsSoldOut}
           locationModalData={locationModalData}       setLocationModalData={setLocationModalData}
           setCropImageSrc={setCropImageSrc}
           setCropTarget={setCropTarget}

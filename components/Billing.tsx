@@ -1,8 +1,8 @@
 
 import React, { useMemo, useState } from 'react';
 import { Customer, Order, Product, GlobalSettings } from '../types';
-import { Copy, JapaneseYen as DollarSign, Edit, X, Search, CheckCircle, Send, Share2, QrCode, Link } from 'lucide-react';
-import { updateDocument } from '../services/firebaseService';
+import { Copy, JapaneseYen as DollarSign, Edit, X, Search, CheckCircle, Send, Share2, QrCode, Link, Loader2 } from 'lucide-react';
+import { updateDocument, confirmPaymentReceived } from '../services/firebaseService';
 
 const genToken = () => Math.random().toString(36).substring(2, 12) + Math.random().toString(36).substring(2, 6);
 
@@ -48,6 +48,21 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
   // Share link modal state
   const [shareModal, setShareModal] = useState<{customer: Customer, url: string} | null>(null);
   const [copyDone, setCopyDone] = useState(false);
+
+  // 待確認匯款
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const pendingPayments = useMemo(
+    () => customers
+      .filter(c => c.paymentReportedAt && !c.paymentConfirmed)
+      .sort((a, b) => (b.paymentReportedAt || 0) - (a.paymentReportedAt || 0)),
+    [customers]
+  );
+  const handleConfirmPayment = async (customerId: string) => {
+    setConfirmingId(customerId);
+    const result = await confirmPaymentReceived(customerId);
+    setConfirmingId(null);
+    if (!result.success) alert(`確認失敗：${result.error || ''}`);
+  };
 
   const handleOpenShareModal = async (customer: Customer) => {
     let token = customer.customerToken;
@@ -193,6 +208,34 @@ export const Billing: React.FC<BillingProps> = ({ customers, orders, products, s
           )}
         </div>
       </div>
+
+      {pendingPayments.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-2.5">
+          <h3 className="text-sm font-semibold text-amber-800 flex items-center gap-1.5">
+            <DollarSign size={15} />待確認匯款 ({pendingPayments.length})
+          </h3>
+          {pendingPayments.map(c => (
+            <div key={c.id} className="flex items-center gap-3 bg-white border border-amber-200/70 rounded-xl px-3.5 py-2.5">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-[#2C2926] truncate">{c.nickname || c.lineName}</div>
+                <div className="text-xs text-[#8A8278] mt-0.5">
+                  後五碼 <span className="font-mono font-semibold text-amber-700">{c.lastFiveDigits}</span>
+                  {c.paymentReportedAt && <span className="ml-2">{new Date(c.paymentReportedAt).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
+                </div>
+              </div>
+              <button
+                onClick={() => handleConfirmPayment(c.id)}
+                disabled={confirmingId === c.id}
+                className="px-3 py-1.5 bg-[#7A9E8A] text-white text-xs font-semibold rounded-lg disabled:opacity-60 shrink-0 flex items-center gap-1.5"
+              >
+                {confirmingId === c.id ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                確認收到
+              </button>
+            </div>
+          ))}
+          <p className="text-[11px] text-amber-600/80">客人 LINE 回報後五碼會自動列在這裡；確認後會推播確認訊息＋賣貨便連結給客人。</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {customerBills.map((bill) => (

@@ -1,8 +1,9 @@
 
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, Firestore, writeBatch } from 'firebase/firestore';
+import { initializeFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, Firestore, writeBatch } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, Auth } from 'firebase/auth';
 import { getFunctions, httpsCallable, Functions } from 'firebase/functions';
+import { getStorage, ref, uploadString, getDownloadURL, FirebaseStorage } from 'firebase/storage';
 import { query, where, getDocs, updateDoc } from 'firebase/firestore';
 import { FirebaseConfig, Product, Customer, Order, TodoItem, GlobalSettings, SalesReport } from '../types';
 
@@ -20,12 +21,17 @@ let app: FirebaseApp;
 export let db: Firestore;
 export let auth: Auth;
 export let functions: Functions;
+export let storage: FirebaseStorage;
 
 try {
   app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
+  // Some networks (corporate proxies, certain mobile carriers/extensions) silently break
+  // Firestore's default streaming connection — no error, the listener just never calls
+  // back. autoDetectLongPolling falls back to long-polling transport when that happens.
+  db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
   auth = getAuth(app);
   functions = getFunctions(app);
+  storage = getStorage(app);
   console.log("Firebase initialized successfully");
 } catch (e) {
   console.error("Firebase init failed", e);
@@ -153,6 +159,17 @@ export const subscribeToSettings = (
 }
 
 // CRUD Operations
+// Uploads a base64 data URL (from compressImage/cropper) to Firebase Storage and
+// returns its public download URL — keeps Firestore documents small instead of
+// embedding the image bytes directly in every product record.
+export const uploadProductImage = async (base64DataUrl: string, folder: string = 'products'): Promise<string> => {
+  if (!storage) throw new Error('Storage 尚未初始化');
+  const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.jpg`;
+  const storageRef = ref(storage, path);
+  await uploadString(storageRef, base64DataUrl, 'data_url');
+  return await getDownloadURL(storageRef);
+};
+
 export const addDocument = async (collectionName: string, data: any) => {
   if (!db) return;
   try {
@@ -213,6 +230,32 @@ export const sendLineMessage = async (lineUserId: string, message: string): Prom
     return result.data as { success: boolean };
   } catch (e: any) {
     console.error('sendLineMessage failed', e);
+    return { success: false, error: e.message };
+  }
+};
+
+// Admin confirms a customer's remittance was received — writes confirmation & pushes the 賣貨便 link via LINE
+export const confirmPaymentReceived = async (customerId: string): Promise<{ success: boolean; error?: string }> => {
+  if (!functions) return { success: false, error: 'Functions 尚未初始化' };
+  try {
+    const callable = httpsCallable(functions, 'confirmPaymentReceived');
+    const result = await callable({ customerId });
+    return result.data as { success: boolean };
+  } catch (e: any) {
+    console.error('confirmPaymentReceived failed', e);
+    return { success: false, error: e.message };
+  }
+};
+
+// Admin opens checkout — broadcasts each customer's bought-item summary + bank info via LINE
+export const broadcastCheckoutOpen = async (): Promise<{ success: boolean; sent?: number; error?: string }> => {
+  if (!functions) return { success: false, error: 'Functions 尚未初始化' };
+  try {
+    const callable = httpsCallable(functions, 'broadcastCheckoutOpen');
+    const result = await callable({});
+    return result.data as { success: boolean; sent: number };
+  } catch (e: any) {
+    console.error('broadcastCheckoutOpen failed', e);
     return { success: false, error: e.message };
   }
 };
@@ -310,4 +353,41 @@ export const batchArchiveSession = async (
     }
     await batch.commit();
   }
+};
+
+// Race a promise against a timeout so a flaky network can't hang a loading screen
+// forever with no feedback — rejects with `message` if `ms` elapses first. Shared so
+// every screen that does a network call needing this guard (LINE OAuth exchange,
+// anonymous sign-in, etc.) uses the same timeout/error-message behaviour instead of
+// each maintaining its own copy.
+export const withTimeout = <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      v => { clearTimeout(timer); resolve(v); },
+      e => { clearTimeout(timer); reject(e); }
+    );
+  });
+
+// Spread remittance volume across multiple bank accounts instead of funnelling everyone
+// into one (which can get a small-business account flagged for unusually high transfer
+// volume). The same customer always lands on the same account — computed deterministically
+// from their id, no extra Firestore writes needed to "remember" the assignment — unless
+// they asked for a specific bank (e.g. to skip an inter-bank transfer fee), in which case
+// `preferredBankId` pins them to that one.
+// NOTE: functions/index.js's broadcastCheckoutOpen has its own copy of this (Cloud
+// Functions is a separate Node codebase that doesn't import from here) — keep both in sync.
+export const pickBankAccountFor = (
+  customerId: string,
+  preferredBankId: string | undefined,
+  accounts: { id: string; label: string; account: string }[] | undefined
+): { id: string; label: string; account: string } | undefined => {
+  if (!accounts || accounts.length === 0) return undefined;
+  if (preferredBankId) {
+    const preferred = accounts.find(a => a.id === preferredBankId);
+    if (preferred) return preferred;
+  }
+  let hash = 0;
+  for (let i = 0; i < customerId.length; i++) hash = (hash * 31 + customerId.charCodeAt(i)) >>> 0;
+  return accounts[hash % accounts.length];
 };

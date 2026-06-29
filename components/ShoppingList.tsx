@@ -1,8 +1,9 @@
 
 import React, { useState, useMemo } from 'react';
 import { Product, Order, Customer, GlobalSettings } from '../types';
-import { CheckCircle, Circle, MapPin, Search, ChevronDown, ChevronUp, Bell, Check, ShoppingCart, User, Plus, Minus, X, Info, ArrowUp, ArrowDown, Send, MessageSquare, Loader2 } from 'lucide-react';
-import { sendLineMessage } from '../services/firebaseService';
+import { CheckCircle, Circle, MapPin, Search, ChevronDown, ChevronUp, Bell, Check, ShoppingCart, User, Plus, X, Info, ArrowUp, ArrowDown, Send, MessageSquare, Loader2, Camera } from 'lucide-react';
+import { sendLineMessage, uploadProductImage } from '../services/firebaseService';
+import { compressImage } from '../utils/imageUtils';
 
 interface ShoppingListProps {
   products: Product[];
@@ -20,7 +21,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [justFilledOrderIds, setJustFilledOrderIds] = useState<string[]>([]);
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
-  const [isGachaWallMode, setIsGachaWallMode] = useState(false);
+  const [showGachaOverview, setShowGachaOverview] = useState(false);
   const [sortBy, setSortBy] = useState<'default' | 'gachaFirst' | 'location' | 'customer'>('default');
 
   // Notification state
@@ -50,6 +51,26 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
   // Filter archived orders and stock items
   const stockCustomerId = customers.find(c => c.isStock)?.id;
   const activeOrders = orders.filter(o => !o.isArchived && o.customerId !== stockCustomerId);
+
+  // id->doc 查表只建一次，避免每筆訂單都對 products/customers 整個陣列線性掃描一次
+  const productById = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+  const customerById = useMemo(() => new Map(customers.map(c => [c.id, c])), [customers]);
+
+  // 客人婉拒保留的商品 — 已封存但保留紀錄，方便有多餘庫存時回頭詢問
+  const [showDeclinedPanel, setShowDeclinedPanel] = useState(false);
+  const declinedGroups = useMemo(() => {
+    const declined = orders.filter(o => o.carryOverDecision === 'declined');
+    const byProduct = new Map<string, { product: Product; entries: { customer: Customer; order: Order }[] }>();
+    declined.forEach(o => {
+      const product  = productById.get(o.productId);
+      const customer = customerById.get(o.customerId);
+      if (!product || !customer) return;
+      const key = `${o.productId}_${o.variant || ''}`;
+      if (!byProduct.has(key)) byProduct.set(key, { product, entries: [] });
+      byProduct.get(key)!.entries.push({ customer, order: o });
+    });
+    return Array.from(byProduct.values());
+  }, [orders, productById, customerById]);
 
   // Group by Product ID AND Variant
   const groupedItems = products.flatMap(product => {
@@ -86,14 +107,16 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
           (o.quantityBought ?? 0) > 0 &&
           o.notificationStatus !== 'NOTIFIED'
         ).filter(o => {
-          const product = products.find(p => p.id === o.productId);
+          const product = productById.get(o.productId);
           return product?.category !== '扭蛋'; // gacha notified via photos, skip
         });
         if (notifiable.length === 0) return null;
         return { customer, orders: notifiable };
       })
       .filter((g): g is { customer: Customer; orders: Order[] } => g !== null);
-  }, [customers, activeOrders, products]);
+  }, [customers, activeOrders, productById]);
+
+  const DEFAULT_BOUGHT_NOTIFY_TEMPLATE = `【{{sessionName}}】{{name}} 嗨！\n\n以下商品已幫你買到囉 🛍️\n\n{{items}}\n\n其他商品繼續幫你找，買到再通知你♡`;
 
   const generateNotifyMsg = (group: { customer: Customer; orders: Order[] }) => {
     const sessionName = settings.sessionName || '本次連線';
@@ -103,7 +126,11 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
       const variantPart = o.variant ? ` (${o.variant})` : '';
       return `✓ ${p?.name ?? '商品'}${variantPart} × ${o.quantityBought}`;
     }).join('\n');
-    return `【${sessionName}】${name} 嗨！\n\n以下商品已幫你買到囉 🛍️\n\n${lines}\n\n其他商品繼續幫你找，買到再通知你♡`;
+    const template = settings.boughtNotificationTemplate || DEFAULT_BOUGHT_NOTIFY_TEMPLATE;
+    return template
+      .replace(/\{\{sessionName\}\}/g, sessionName)
+      .replace(/\{\{name\}\}/g, name)
+      .replace(/\{\{items\}\}/g, lines);
   };
 
   const markGroupNotified = (group: { customer: Customer; orders: Order[] }) => {
@@ -120,6 +147,35 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
   // Compute unique locations and customers for filters
   const uniqueLocations = Array.from(new Set(products.map(p => p.sourcingLocations?.find(l => l.isPrimary)?.name || p.sourcingLocations?.[0]?.name || p.sourcingLocation).filter(Boolean))) as string[];
   const uniqueCustomers = Array.from(new Set(activeOrders.map(o => o.customerId)));
+
+  // 待扭總覽：以「客人」為單位分組，每位客人底下列出他還沒扭完的每一款設計（各自的
+  // 數量、是否已扭），不用逐個价位訂單打開找，也不會把不同客人、不同款式混在一起算成
+  // 同一個數字。沒附款式照片的訂單，退回顯示「未附款式照片」+ 該訂單剩餘需求量。
+  type PendingGachaRow =
+    | { kind: 'item'; order: Order; url: string; qty: number; boughtQty: number; productName: string }
+    | { kind: 'unphotographed'; order: Order; remaining: number; productName: string };
+  const pendingGachaGroups = useMemo(() => {
+    const map = activeOrders.reduce((acc, o) => {
+      const product = productById.get(o.productId);
+      if (product?.category !== '扭蛋' || o.quantityBought >= o.quantity) return acc;
+      const pendingItems = (o.requestedItems || []).filter(i => (i.boughtQty || 0) < i.qty);
+      const entry = acc.get(o.customerId) || { customer: customerById.get(o.customerId), rows: [] as PendingGachaRow[] };
+      if (pendingItems.length > 0) {
+        pendingItems.forEach(i => entry.rows.push({ kind: 'item', order: o, url: i.url, qty: i.qty, boughtQty: i.boughtQty || 0, productName: product.name }));
+      } else {
+        entry.rows.push({ kind: 'unphotographed', order: o, remaining: o.quantity - o.quantityBought, productName: product.name });
+      }
+      acc.set(o.customerId, entry);
+      return acc;
+    }, new Map<string, { customer: Customer | undefined; rows: PendingGachaRow[] }>());
+    return Array.from(map.values());
+  }, [activeOrders, productById, customerById]);
+  const pendingGachaTotalRows = pendingGachaGroups.reduce((n, g) => n + g.rows.length, 0);
+
+  // Fallback bump for orders with no per-design photo yet (just count, no breakdown).
+  const handleBumpGachaBought = (order: Order) => {
+    onUpdateOrder({ ...order, quantityBought: Math.min(order.quantity, order.quantityBought + 1), notificationStatus: 'NOTIFIED' });
+  };
 
   // Filter by search, location, and customer
   const filteredItems = groupedItems.filter(item => {
@@ -197,6 +253,78 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
   const toggleNotification = (order: Order) => {
       const newStatus = order.notificationStatus === 'NOTIFIED' ? 'UNNOTIFIED' : 'NOTIFIED';
       onUpdateOrder({...order, notificationStatus: newStatus});
+  };
+
+  // ── 扭蛋照片（客人要的款式 / 扭到的結果） ───────────────────────────────────
+  // Both attach directly to the order instead of being modelled as separate per-design
+  // products, and both sync instantly across whoever's logged in — replacing the old
+  // LINE-album hand-off where only one person could see/clear a photo, so the other
+  // staff member never knew whether something had already been rolled.
+  // - requestedItems: snapped as soon as the request comes in, one entry per design with
+  //   its own quantity (so "design A x3, design B x2" stays visible instead of collapsing
+  //   into one order-level number), and a running boughtQty staff bump per design.
+  // - resultImages: snapped after rolling, proof of what was actually received.
+  // Order.quantity must never fall behind what the itemised photos add up to — otherwise
+  // "已買到/總需求" and the per-design counts can disagree about whether the order is done.
+  // It can stay above the itemised sum, though: some of the quantity may not have a photo
+  // attached yet, so we only ever grow it here, never shrink it.
+  const sumRequestedQty = (items: { qty: number }[], currentQty: number) =>
+    Math.max(currentQty, items.reduce((sum, i) => sum + i.qty, 0));
+  const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  const handleUploadRequestedItems = async (order: Order, files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploadingFor(`${order.id}:requested`);
+    try {
+      const urls = await Promise.all(Array.from(files).map(async f => uploadProductImage(await compressImage(f))));
+      const newItems = urls.map(url => ({ url, qty: 1, boughtQty: 0 }));
+      const items = [...(order.requestedItems || []), ...newItems];
+      // 訂單總數量要跟著款式照片的數量加總走，不然「總買到/總需求」跟個別款式會兜不起來
+      onUpdateOrder({ ...order, requestedItems: items, quantity: sumRequestedQty(items, order.quantity) });
+    } catch {
+      alert('照片上傳失敗，請重試');
+    } finally {
+      setUploadingFor(null);
+    }
+  };
+  const handleSetRequestedQty = (order: Order, url: string, qty: number) => {
+    const items = (order.requestedItems || []).map(i => i.url === url ? { ...i, qty: Math.max(1, qty) } : i);
+    onUpdateOrder({ ...order, requestedItems: items, quantity: sumRequestedQty(items, order.quantity) });
+  };
+  const handleRemoveRequestedItem = (order: Order, url: string) => {
+    onUpdateOrder({ ...order, requestedItems: (order.requestedItems || []).filter(i => i.url !== url) });
+  };
+  // Tapping a design bumps its boughtQty by 1 — not the whole qty at once, since the
+  // machine might run dry partway through and leave that same design half-finished.
+  // Each +1/-1 also moves the order's quantityBought in step, so 總買到/billing stats
+  // stay correct without double entry.
+  const handleBumpRequestedItem = (order: Order, url: string, delta: 1 | -1) => {
+    const items = order.requestedItems || [];
+    const item = items.find(i => i.url === url);
+    if (!item) return;
+    const newBoughtQty = Math.max(0, Math.min(item.qty, (item.boughtQty || 0) + delta));
+    if (newBoughtQty === (item.boughtQty || 0)) return;
+    onUpdateOrder({
+      ...order,
+      requestedItems: items.map(i => i.url === url ? { ...i, boughtQty: newBoughtQty } : i),
+      quantityBought: Math.max(0, Math.min(order.quantity, order.quantityBought + delta)),
+      notificationStatus: 'NOTIFIED',
+    });
+  };
+
+  const handleUploadResultImages = async (order: Order, files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploadingFor(`${order.id}:result`);
+    try {
+      const urls = await Promise.all(Array.from(files).map(async f => uploadProductImage(await compressImage(f))));
+      onUpdateOrder({ ...order, resultImages: [...(order.resultImages || []), ...urls] });
+    } catch {
+      alert('照片上傳失敗，請重試');
+    } finally {
+      setUploadingFor(null);
+    }
+  };
+  const handleRemoveResultImage = (order: Order, url: string) => {
+    onUpdateOrder({ ...order, resultImages: (order.resultImages || []).filter(u => u !== url) });
   };
 
   const handleMoveOrderUp = (item: typeof filteredItems[0], index: number) => {
@@ -358,13 +486,13 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
         
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-4 gap-1 sm:flex sm:flex-wrap sm:gap-2">
-            <button 
-              onClick={() => setIsGachaWallMode(!isGachaWallMode)}
-              className={`text-xs px-1 sm:px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all w-full sm:w-auto border ${isGachaWallMode ? 'bg-pink-100 text-stone-600 border-pink-300 shadow-inner' : 'bg-pink-50 text-stone-600 border-pink-100 hover:bg-pink-100'}`}
+            <button
+              onClick={() => setShowGachaOverview(!showGachaOverview)}
+              className={`text-xs px-1 sm:px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all w-full sm:w-auto border ${showGachaOverview ? 'bg-orange-100 text-stone-600 border-orange-300 shadow-inner' : 'bg-orange-50 text-stone-600 border-orange-200 hover:bg-orange-100'}`}
             >
-              <ShoppingCart size={12} className="hidden sm:block" /> {isGachaWallMode ? '返回' : '圖牆'}
+              <Camera size={12} className="hidden sm:block" /> {showGachaOverview ? '返回' : '待扭總覽'}
             </button>
-            
+
             <button 
               onClick={() => setSortBy(sortBy === 'default' ? 'gachaFirst' : 'default')}
               className={`text-sm px-1 sm:px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all w-full sm:w-auto border ${sortBy === 'gachaFirst' ? 'bg-amber-100 text-stone-600 border-amber-300 shadow-inner' : 'bg-amber-50 text-stone-600 border-amber-100 hover:bg-amber-100'}`}
@@ -494,95 +622,82 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
           </div>
         </div>
       </div>
-      
-      <div className="bg-white shadow-md rounded-b-xl overflow-hidden min-h-[500px]">
-        {filteredItems.length === 0 ? (
-          <div className="p-10 text-center text-stone-400">
-            沒有符合的採購項目 (或所有訂單已封存)
-          </div>
-        ) : isGachaWallMode ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-4 bg-stone-50">
-            {filteredItems.map(item => {
-              // Calculate who needs what
-              const customerNeeds: Record<string, number> = {};
-              item.orders.forEach(o => {
-                const customer = customers.find(c => c.id === o.customerId);
-                const name = customer?.nickname || customer?.lineName || '未知客人';
-                if (!customerNeeds[name]) customerNeeds[name] = 0;
-                customerNeeds[name] += o.quantity;
-              });
 
-              return (
-                <div key={item.id} className={`bg-white rounded-2xl shadow-sm border overflow-hidden flex flex-col transition-all ${item.isComplete ? 'border-green-200 opacity-60' : 'border-stone-200 hover:border-pink-300 hover:shadow-md'}`}>
-                  <div 
-                    className="relative w-full bg-stone-100 cursor-zoom-in overflow-hidden" 
-                    style={{ paddingBottom: '125%', height: 0 }}
-                    onClick={() => setViewingProduct(item.product)}
-                  >
-                    <img src={(item.product.imageUrl && !item.product.imageUrl.includes('picsum.photos')) ? item.product.imageUrl : (item.product.category === '扭蛋' ? DEFAULT_GACHA_IMAGE : (item.product.imageUrl || 'https://picsum.photos/seed/product/400/500'))} className="absolute inset-0 w-full h-full object-cover" alt={item.product.name} referrerPolicy="no-referrer" loading="lazy" />
-                    {item.isComplete && (
-                      <div className="absolute inset-0 bg-white/50 flex items-center justify-center backdrop-blur-[1px]">
-                        <CheckCircle className="w-16 h-16 text-green-500 drop-shadow-md" />
-                      </div>
-                    )}
-                    <div className="absolute top-2 right-2 bg-black/60 text-white px-2 py-1 rounded-lg text-sm backdrop-blur-sm">
-                      {item.totalBought} / {item.totalNeeded}
-                    </div>
-                  </div>
-                  
-                  <div className="p-3 flex flex-col flex-1">
-                    <h3 className="text-stone-800 text-sm line-clamp-2 mb-1">{item.product.name}</h3>
-                    {item.variant && (
-                      <span className="inline-block bg-amber-100 text-amber-800 text-xs px-2 py-0.5 rounded w-fit mb-2">
-                        {item.variant}
+      {declinedGroups.length > 0 && (
+        <div className="bg-stone-50 border border-stone-200 rounded-xl my-3 p-4">
+          <button onClick={() => setShowDeclinedPanel(!showDeclinedPanel)} className="w-full flex items-center justify-between text-left">
+            <span className="text-sm font-semibold text-stone-600 flex items-center gap-1.5">
+              <X size={14} className="text-stone-400" />
+              客人婉拒保留的商品 ({declinedGroups.reduce((sum, g) => sum + g.entries.length, 0)})
+            </span>
+            {showDeclinedPanel ? <ChevronUp size={16} className="text-stone-400" /> : <ChevronDown size={16} className="text-stone-400" />}
+          </button>
+          <p className="text-[11px] text-stone-400 mt-1">這些客人之前表示不需要保留到下次連線。如果手上有多餘庫存，可以回頭詢問看看。</p>
+          {showDeclinedPanel && (
+            <div className="mt-3 space-y-2.5">
+              {declinedGroups.map(({ product, entries }) => (
+                <div key={product.id + (entries[0]?.order.variant || '')} className="bg-white border border-stone-100 rounded-lg p-3">
+                  <div className="text-sm font-medium text-[#2C2926]">{product.name}{entries[0]?.order.variant ? `（${entries[0].order.variant}）` : ''}</div>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {entries.map(({ customer, order }) => (
+                      <span key={order.id} className="text-xs bg-stone-100 text-stone-600 px-2 py-1 rounded-md">
+                        {customer.nickname || customer.lineName} × {order.quantity}
                       </span>
-                    )}
-                    
-                    <div className="mt-auto pt-2 border-t border-stone-100">
-                      <div className="text-xs text-stone-500 leading-relaxed max-h-20 overflow-y-auto">
-                        {Object.entries(customerNeeds).map(([name, qty]) => (
-                          <div key={name} className="flex justify-between">
-                            <span className="truncate pr-1">{name}</span>
-                            <span className="text-stone-700">x{qty}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between gap-1 bg-stone-100 rounded-xl p-1">
-                      <button 
-                        onClick={() => handleUpdateBought(item, Math.max(0, item.totalBought - 1))}
-                        disabled={item.totalBought === 0}
-                        className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${item.totalBought === 0 ? 'text-stone-300' : 'bg-white text-stone-600 shadow-sm hover:bg-stone-50'}`}
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <div className="flex-1 text-center text-sm">
-                        <span className={item.totalBought > 0 ? 'text-green-600' : 'text-stone-500'}>{item.totalBought}</span>
-                        <span className="text-stone-400 mx-1">/</span>
-                        <span className="text-stone-700">{item.totalNeeded}</span>
-                      </div>
-                      <button 
-                        onClick={() => handleUpdateBought(item, Math.min(item.totalNeeded, item.totalBought + 1))}
-                        disabled={item.isComplete}
-                        className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${item.isComplete ? 'text-stone-300' : 'bg-white text-stone-600 shadow-sm hover:bg-stone-50'}`}
-                      >
-                        <Plus size={14} />
-                      </button>
-                      {!item.isComplete && (
-                        <button 
-                          onClick={() => handleUpdateBought(item, item.totalNeeded)}
-                          className="w-7 h-7 ml-1 flex items-center justify-center rounded-lg bg-green-100 text-green-600 hover:bg-green-200 transition-colors shadow-sm"
-                          title="一鍵全買"
-                        >
-                          <Check size={14} strokeWidth={3} />
-                        </button>
-                      )}
-                    </div>
+                    ))}
                   </div>
                 </div>
-              );
-            })}
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="bg-white shadow-md rounded-b-xl overflow-hidden min-h-[500px]">
+        {showGachaOverview ? (
+          <div className="p-4 space-y-5">
+            <h3 className="text-stone-800 text-sm flex items-center gap-2"><Camera size={16} className="text-orange-500" />待扭總覽（{pendingGachaTotalRows} 款未完成）</h3>
+            {pendingGachaGroups.length === 0 ? (
+              <div className="text-center text-stone-400 text-sm py-12">目前沒有還沒扭完的訂單</div>
+            ) : pendingGachaGroups.map(group => (
+              <div key={group.customer?.id || 'unknown'}>
+                <div className="flex items-center gap-2 mb-2">
+                  <User size={14} className="text-stone-400" />
+                  <span className="text-sm text-stone-800">{group.customer?.nickname || group.customer?.lineName || '未知客人'}</span>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {group.rows.map((row, i) => row.kind === 'item' ? (
+                    <div key={`${row.order.id}-${row.url}`} className="relative w-24 h-24 rounded-xl overflow-hidden border border-stone-200 group">
+                      <img
+                        src={row.url}
+                        onClick={() => handleBumpRequestedItem(row.order, row.url, 1)}
+                        className="w-full h-full object-cover cursor-pointer"
+                        alt="要扭的款式" referrerPolicy="no-referrer" loading="lazy"
+                        title="點一下＝買到 +1"
+                      />
+                      <div className="absolute top-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded-md pointer-events-none">{row.productName}</div>
+                      <button
+                        onClick={() => handleBumpRequestedItem(row.order, row.url, -1)}
+                        className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center bg-black/50 text-white text-sm rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+                      >−</button>
+                      <div className="absolute bottom-1 right-1 bg-black/70 text-white text-xs font-medium px-1.5 py-0.5 rounded-md pointer-events-none">{row.boughtQty}/{row.qty}</div>
+                    </div>
+                  ) : (
+                    <div key={`${row.order.id}-unphotographed-${i}`} className="relative w-24 h-24 rounded-xl border border-dashed border-stone-300 bg-stone-50 flex flex-col items-center justify-center gap-1 p-1 text-center">
+                      <span className="text-[10px] text-stone-400">{row.productName}</span>
+                      <span className="text-[10px] text-stone-400">未附款式照片</span>
+                      <button
+                        onClick={() => handleBumpGachaBought(row.order)}
+                        className="text-[10px] px-2 py-0.5 rounded-md bg-[#E5EFEA] text-[#3F6B52] border border-[#7A9E8A]/30"
+                      >+1（剩{row.remaining}）</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="p-10 text-center text-stone-400">
+            沒有符合的採購項目 (或所有訂單已封存)
           </div>
         ) : (
           <div className="divide-y divide-stone-100">
@@ -672,14 +787,16 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                           const isNotified = order.notificationStatus === 'NOTIFIED';
                           const isJustFilled = justFilledOrderIds.includes(order.id);
                           
+                          const isGachaOrder = item.product.category === '扭蛋';
                           return (
-                            <div 
-                                key={order.id} 
-                                className={`flex justify-between items-center text-sm py-2 px-3 rounded-lg border transition-all duration-500
-                                    ${isJustFilled ? 'bg-yellow-100 border-yellow-300 ring-2 ring-yellow-200 scale-[1.02]' : 
+                            <div
+                                key={order.id}
+                                className={`text-sm py-2 px-3 rounded-lg border transition-all duration-500
+                                    ${isJustFilled ? 'bg-yellow-100 border-yellow-300 ring-2 ring-yellow-200 scale-[1.02]' :
                                       isFullyAllocated ? 'bg-green-50 border-green-100' : 'bg-white border-stone-200 shadow-sm'
                                     }`}
                             >
+                              <div className="flex justify-between items-center">
                               <div className="flex items-center gap-3">
                                 <span className="text-stone-300 w-4 text-sm font-mono">#{idx + 1}</span>
                                 <div className="flex items-center gap-2">
@@ -699,7 +816,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                  <button 
+                                  <button
                                       onClick={() => toggleNotification(order)}
                                       className={`p-1.5 rounded-full transition-colors ${isNotified ? 'bg-green-200 text-green-700' : 'bg-stone-100 text-stone-400 hover:bg-stone-200'}`}
                                       title={isNotified ? "已通知" : "未通知"}
@@ -708,7 +825,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                                   </button>
                                   {onBulkUpdateOrders && (
                                     <div className="flex flex-col gap-0.5 ml-1">
-                                      <button 
+                                      <button
                                         onClick={() => handleMoveOrderUp(item, idx)}
                                         disabled={idx === 0}
                                         className={`p-0.5 rounded transition-colors ${idx === 0 ? 'text-stone-200 cursor-not-allowed' : 'text-stone-400 hover:bg-stone-200 hover:text-stone-700'}`}
@@ -716,7 +833,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                                       >
                                         <ArrowUp size={12} />
                                       </button>
-                                      <button 
+                                      <button
                                         onClick={() => handleMoveOrderDown(item, idx)}
                                         disabled={idx === item.orders.length - 1}
                                         className={`p-0.5 rounded transition-colors ${idx === item.orders.length - 1 ? 'text-stone-200 cursor-not-allowed' : 'text-stone-400 hover:bg-stone-200 hover:text-stone-700'}`}
@@ -728,6 +845,80 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                                   )}
                                 </div>
                               </div>
+                              </div>
+
+                              {/* 扭蛋照片：直接掛在這筆訂單上，兩人即時同步，取代 LINE 相簿 */}
+                              {isGachaOrder && (
+                                <div className="space-y-2 mt-2 pt-2 border-t border-stone-100">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {(order.requestedItems || []).map(item => {
+                                      const boughtQty = item.boughtQty || 0;
+                                      const done = boughtQty >= item.qty;
+                                      return (
+                                        <div key={item.url} className={`relative w-14 h-14 rounded-md overflow-hidden border group ${done ? 'border-green-300' : 'border-stone-200'}`}>
+                                          <img
+                                            src={item.url}
+                                            onClick={() => handleBumpRequestedItem(order, item.url, 1)}
+                                            className={`w-full h-full object-cover cursor-pointer ${done ? 'opacity-50' : ''}`}
+                                            alt="要扭的款式" referrerPolicy="no-referrer" loading="lazy"
+                                            title="點一下＝買到 +1"
+                                          />
+                                          {done && <Check size={20} className="absolute inset-0 m-auto text-white drop-shadow pointer-events-none" />}
+                                          <button
+                                            onClick={() => handleBumpRequestedItem(order, item.url, -1)}
+                                            className="absolute top-0 left-0 w-5 h-5 flex items-center justify-center bg-black/50 text-white text-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                                            title="-1"
+                                          >−</button>
+                                          <button
+                                            onClick={() => handleRemoveRequestedItem(order, item.url)}
+                                            className="absolute top-0 right-0 w-5 h-5 flex items-center justify-center bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                          ><X size={11} /></button>
+                                          <div className="absolute bottom-0 inset-x-0 bg-black/70 flex items-center justify-center gap-0.5">
+                                            <span className="text-[10px] text-white">{boughtQty}/</span>
+                                            <input
+                                              type="number" min={1} value={item.qty}
+                                              onChange={e => handleSetRequestedQty(order, item.url, Number(e.target.value))}
+                                              onClick={e => e.stopPropagation()}
+                                              className="w-5 text-[10px] text-center bg-transparent text-white outline-none"
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                    <label className="w-14 h-14 rounded-md border border-dashed border-stone-300 flex items-center justify-center cursor-pointer text-stone-400 hover:border-[#7A9E8A] hover:text-[#7A9E8A] transition-colors">
+                                      {uploadingFor === `${order.id}:requested`
+                                        ? <Loader2 size={14} className="animate-spin" />
+                                        : <Camera size={14} />}
+                                      <input
+                                        type="file" accept="image/*" multiple className="hidden"
+                                        onChange={e => { handleUploadRequestedItems(order, e.target.files); e.target.value = ''; }}
+                                      />
+                                    </label>
+                                    <span className="text-xs text-stone-400">客人要的款式（點照片＝買到+1，下方數字右邊可改要扭幾個）</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {(order.resultImages || []).map(url => (
+                                      <div key={url} className="relative w-10 h-10 rounded-md overflow-hidden border border-stone-200 group">
+                                        <img src={url} className="w-full h-full object-cover" alt="扭蛋結果" referrerPolicy="no-referrer" loading="lazy" />
+                                        <button
+                                          onClick={() => handleRemoveResultImage(order, url)}
+                                          className="absolute inset-0 bg-black/50 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                                        ><X size={14} /></button>
+                                      </div>
+                                    ))}
+                                    <label className="w-10 h-10 rounded-md border border-dashed border-stone-300 flex items-center justify-center cursor-pointer text-stone-400 hover:border-[#7A9E8A] hover:text-[#7A9E8A] transition-colors">
+                                      {uploadingFor === `${order.id}:result`
+                                        ? <Loader2 size={14} className="animate-spin" />
+                                        : <Camera size={14} />}
+                                      <input
+                                        type="file" accept="image/*" multiple className="hidden"
+                                        onChange={e => { handleUploadResultImages(order, e.target.files); e.target.value = ''; }}
+                                      />
+                                    </label>
+                                    <span className="text-xs text-stone-400">扭蛋結果照片</span>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           );
                         })}

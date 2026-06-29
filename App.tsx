@@ -1,6 +1,8 @@
 import React, { useState, useEffect, Component, ErrorInfo, ReactNode, lazy, Suspense } from 'react';
 import { LayoutDashboard, Radio, ShoppingBag, Receipt, Menu, X, Users, Settings as SettingsIcon, Package, ClipboardList, CloudLightning, AlertTriangle, CheckCircle, RefreshCw, LogIn, LogOut } from 'lucide-react';
-import { CustomerPage } from './components/CustomerPage';
+// Lazy-loaded so admins never download the customer-facing bundle, and customers
+// never download the admin dashboard bundle — each route only pulls its own code.
+const CustomerPage = lazy(() => import('./components/CustomerPage').then(m => ({ default: m.CustomerPage })));
 
 // Lazy-load heavy tab components — initial bundle drops from 1.2MB to ~200KB
 const Dashboard  = lazy(() => import('./components/Dashboard').then(m => ({ default: m.Dashboard })));
@@ -27,7 +29,6 @@ function TabLoadingFallback() {
 import { Product, Order, Customer, GlobalSettings, TodoItem, SalesReport } from './types';
 import type { User } from 'firebase/auth';
 import * as fbService from './services/firebaseService';
-import { analyzeSalesData } from './services/geminiService';
 
 const safeId = () => crypto.randomUUID();
 
@@ -74,6 +75,14 @@ xxxx-xxxx-xxxx
 匯款完成後麻煩回傳帳號後五碼，確認後提供賣貨便下單連結💌
 有任何問題都可以隨時找我，謝謝你這次的支持꒰՞⸝⸝•̀𖥦•́꒱و ̖́-`;
 
+const DEFAULT_BOUGHT_NOTIFY_TEMPLATE = `【{{sessionName}}】{{name}} 嗨！
+
+以下商品已幫你買到囉 🛍️
+
+{{items}}
+
+其他商品繼續幫你找，買到再通知你♡`;
+
 const INITIAL_SETTINGS: GlobalSettings = {
   jpyExchangeRate: 0.23,
   pricingRules: [
@@ -88,6 +97,7 @@ const INITIAL_SETTINGS: GlobalSettings = {
   pickupPayment: 20,
   productCategories: ['藥妝', '零食', '服飾', '雜貨', '伴手禮', '限定商品', '扭蛋'],
   billingMessageTemplate: DEFAULT_BILLING_TEMPLATE,
+  boughtNotificationTemplate: DEFAULT_BOUGHT_NOTIFY_TEMPLATE,
   useCloudSync: false,
   customerLevels: { vip: 10000, vvip: 30000 },
   currentAiAnalysis: '',
@@ -234,12 +244,14 @@ function MainApp() {
     const activeOrders = orders.filter(o => !o.isArchived && o.customerId !== stockCustomerId);
     if (activeOrders.length === 0) { showAlert("沒有可封存的訂單。"); return; }
     
-    const sessionStats = new Map<string, number>(); 
+    const sessionStats = new Map<string, number>();
     let sessionRevenue = 0; let sessionCost = 0;
-    
-    activeOrders.forEach(o => { 
-      const p = products.find(prod => prod.id === o.productId); 
-      if(p && o.quantityBought > 0) { 
+    const productById = new Map(products.map(p => [p.id, p]));
+    const customerById = new Map(customers.map(c => [c.id, c]));
+
+    activeOrders.forEach(o => {
+      const p = productById.get(o.productId);
+      if(p && o.quantityBought > 0) {
         const price = (o.variant && p.variantPrices && p.variantPrices[o.variant]) 
           ? p.variantPrices[o.variant] 
           : p.priceTWD;
@@ -252,8 +264,10 @@ function MainApp() {
     });
     
     // Generate AI analysis for this session before archiving
+    // (dynamically imported — most sessions don't need the Gemini SDK loaded at all)
     let sessionAiAnalysis = '';
     try {
+      const { analyzeSalesData } = await import('./services/geminiService');
       sessionAiAnalysis = await analyzeSalesData(products, activeOrders, customers, settings.geminiApiKey);
     } catch (error) {
       console.error("AI Analysis failed during archive:", error);
@@ -279,8 +293,13 @@ function MainApp() {
 
     activeOrders.forEach(o => {
       if (o.quantityBought === 0) {
-        // Not found at all — mark as carried over so customer can choose next session
-        ordersToUpdate.push({ ...o, isCarriedOver: true, sessionName });
+        if (o.carryOverDecision === 'declined') {
+          // Customer explicitly declined to keep this — archive it (no carry-over)
+          ordersToUpdate.push({ ...o, ...archiveStamp });
+        } else {
+          // Not found, but kept (or no response yet) — carry over so customer can buy next session
+          ordersToUpdate.push({ ...o, isCarriedOver: true, sessionName });
+        }
       } else if (o.quantityBought >= o.quantity) {
         // Fully bought, archive it
         ordersToUpdate.push({ ...o, ...archiveStamp });
@@ -289,7 +308,14 @@ function MainApp() {
         // 1. Archive the bought part
         ordersToUpdate.push({ ...o, quantity: o.quantityBought, ...archiveStamp });
         // 2. Create a new active order for the unbought part — mark as carried over
-        ordersToAdd.push({
+        //    unless the customer explicitly declined to keep it
+        if (o.carryOverDecision === 'declined') return;
+        // 扭蛋款式照片：已扭完的設計留在剛封存的那筆做紀錄，沒扭完的才跟著帶到新訂單繼續追蹤，
+        // 並把 boughtQty 歸零——新訂單從 0 開始算，不然會跟同樣歸零的 quantityBought 對不上。
+        const pendingRequestedItems = o.requestedItems
+          ?.filter(i => (i.boughtQty || 0) < i.qty)
+          .map(i => ({ ...i, boughtQty: 0 }));
+        const carried: Order = {
           ...o,
           id: safeId(),
           quantity: o.quantity - o.quantityBought,
@@ -297,15 +323,19 @@ function MainApp() {
           status: 'PENDING',
           isCarriedOver: true,
           sessionName,
-          timestamp: Date.now()
-        });
+          timestamp: Date.now(),
+        };
+        // 結果照片是「已收到」的證明，新訂單還沒履行，不該繼承上一場的結果照片
+        delete carried.resultImages;
+        if (pendingRequestedItems) carried.requestedItems = pendingRequestedItems;
+        ordersToAdd.push(carried);
       }
     });
 
     if (isCloud) {
       const customerUpdates: { id: string; totalSpent: number; sessionCount: number }[] = [];
       sessionStats.forEach((spent, custId) => {
-        const cust = customers.find(c => c.id === custId);
+        const cust = customerById.get(custId);
         if (cust) customerUpdates.push({
           id: custId,
           totalSpent: (cust.totalSpent || 0) + spent,
@@ -313,19 +343,21 @@ function MainApp() {
         });
       });
       await fbService.batchArchiveSession(newReport, customerUpdates, ordersToUpdate, ordersToAdd);
-      fbService.saveSettingsToCloud({ ...settings, currentAiAnalysis: '' });
-    } 
-    else { 
-      setReports(prev => [newReport, ...prev]); 
-      setCustomers(prev => prev.map(c => sessionStats.has(c.id) ? { ...c, totalSpent: (c.totalSpent || 0) + sessionStats.get(c.id)!, sessionCount: (c.sessionCount || 0) + 1 } : c)); 
-      
+      // 換場次：本場扭蛋牆的機台照片清掉（下一場拍的是不同的店），但客人還沒扭到的代扭
+      // 清單不受影響——那是靠上面的 carry-over 訂單機制保留的，跟這裡的牆面照片無關。
+      fbService.saveSettingsToCloud({ ...settings, currentAiAnalysis: '', gachaWallImages: [] });
+    }
+    else {
+      setReports(prev => [newReport, ...prev]);
+      setCustomers(prev => prev.map(c => sessionStats.has(c.id) ? { ...c, totalSpent: (c.totalSpent || 0) + sessionStats.get(c.id)!, sessionCount: (c.sessionCount || 0) + 1 } : c));
+
       setOrders(prev => {
         const updatedMap = new Map(ordersToUpdate.map(o => [o.id, o]));
         const newPrev = prev.map(o => updatedMap.has(o.id) ? updatedMap.get(o.id)! : o);
         return [...newPrev, ...ordersToAdd];
       });
-      
-      setSettings(prev => ({ ...prev, currentAiAnalysis: '' })); 
+
+      setSettings(prev => ({ ...prev, currentAiAnalysis: '', gachaWallImages: [] }));
     }
     showAlert('✅ 連線已結算並封存！未買到的商品已保留至下次連線。');
   };
@@ -659,21 +691,37 @@ export const showAlert = (message: string) => {
 };
 
 export default function App() {
-  // Any query params at root = LINE OAuth callback (success or cancel/error).
-  // Normal GPick navigation never adds query params to the root URL.
-  if (window.location.search) {
-    const searchParams  = new URLSearchParams(window.location.search);
+  // A `code` param, or a `state` param that actually looks like ours ("customer_..."),
+  // at root = LINE OAuth callback (success or cancel/error). A bare `state`/`code` with
+  // unrelated content must NOT be mistaken for our OAuth flow and force-redirected —
+  // that's exactly what happened once already with manifest.json's start_url=
+  // "/?source=pwa" being read as a failed login attempt and bouncing the admin to the
+  // customer page; narrowing to "code present, or state matches our own format" closes
+  // the same class of bug for any other future param named `code`/`state`.
+  const rootSearchParams = new URLSearchParams(window.location.search);
+  const rootLineState = rootSearchParams.get('state');
+  const looksLikeOurState = !!rootLineState && rootLineState.startsWith('customer_');
+  if (rootSearchParams.has('code') || looksLikeOurState) {
+    const searchParams = rootSearchParams;
     const lineCode      = searchParams.get('code');
-    const lineState     = searchParams.get('state');
-    const customerToken = lineState?.startsWith('customer_')
-      ? (lineState.slice('customer_'.length) || undefined)
+    const lineState     = rootLineState;
+    // state carries "customer_{token}|{pkceVerifier}" — the verifier rides along in the
+    // URL round-trip itself so login still works inside LINE's own in-app browser, where
+    // sessionStorage set before the redirect is often not visible after returning.
+    const [statePrefix, stateVerifier] = (lineState || '').split('|');
+    const customerToken = statePrefix?.startsWith('customer_')
+      ? (statePrefix.slice('customer_'.length) || undefined)
       : undefined;
 
     sessionStorage.removeItem('gpick_line_return');
 
     if (lineCode) {
       // Success: hand off to CustomerPage to process the OAuth code
-      return <CustomerPage token={customerToken} lineCallbackCode={lineCode} />;
+      return (
+        <Suspense fallback={<div className="min-h-screen bg-[#fff9f3]" />}>
+          <CustomerPage token={customerToken} lineCallbackCode={lineCode} lineCallbackVerifier={stateVerifier || undefined} />
+        </Suspense>
+      );
     }
     // Cancel or error: always go back to customer page, never show admin
     window.location.replace(`/${customerToken ? `#/c/${customerToken}` : '#/c'}`);
@@ -681,10 +729,18 @@ export default function App() {
   }
 
   // Hash-based routing: #/c → universal | #/c/TOKEN → token mode
+  // Strip any "?..." deep-link query (e.g. "#/c?group=藥妝美容" for a shared category link)
+  // before matching the route — otherwise a query-string-only universal link with no
+  // trailing "/" fails both checks below and silently falls through to the admin panel.
   const hash = window.location.hash;
-  if (hash === '#/c' || hash.startsWith('#/c/')) {
-    const customerToken = hash.startsWith('#/c/') ? hash.slice(4) : undefined;
-    return <CustomerPage token={customerToken} />;
+  const hashPath = hash.split('?')[0];
+  if (hashPath === '#/c' || hashPath.startsWith('#/c/')) {
+    const customerToken = hashPath.startsWith('#/c/') ? hashPath.slice(4) : undefined;
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-[#fff9f3]" />}>
+        <CustomerPage token={customerToken} />
+      </Suspense>
+    );
   }
 
   return <AdminApp />;
