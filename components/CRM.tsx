@@ -2,7 +2,8 @@
 import React, { useState } from 'react';
 import { Customer, Order, Product, GlobalSettings } from '../types';
 import { showAlert } from '../App';
-import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, Trash2, StickyNote, Award, Crown, Sprout, Skull, History, Plus, UserPlus, Package, ShoppingCart, Check, CreditCard, AlignLeft } from 'lucide-react';
+import { unlinkCustomerLine, updateDocument } from '../services/firebaseService';
+import { Search, User, Phone, MapPin, Calendar, Edit2, AlertTriangle, Save, X, BarChart2, ChevronDown, ChevronUp, Trash2, StickyNote, Award, Crown, Sprout, Skull, History, Plus, UserPlus, Package, ShoppingCart, Check, CreditCard, AlignLeft, Link2, Unlink, Copy } from 'lucide-react';
 
 interface CRMProps {
   customers: Customer[];
@@ -43,6 +44,7 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
 
   const [deleteCustomerConfirm, setDeleteCustomerConfirm] = useState<string | null>(null);
   const [deleteOrderConfirm, setDeleteOrderConfirm] = useState<string | null>(null);
+  const [unlinkConfirmId, setUnlinkConfirmId] = useState<string | null>(null);
 
   const filteredCustomers = customers.filter(c => 
     !c.isStock && ( // Exclude stock from CRM list
@@ -157,6 +159,47 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
       setDeleteOrderConfirm(orderId);
   };
 
+  // --- LINE Link Management ---
+  // Customers who clicked "是我" by mistake (matched wrong record during the LINE
+  // login flow) get stuck — they can't re-link to the right record until an admin
+  // clears the wrong lineUserId binding here.
+  const handleUnlinkLine = async (customer: Customer) => {
+      try {
+          await unlinkCustomerLine(customer.id);
+      } catch (e) {
+          console.error('unlink line failed', e);
+          showAlert('解除連結失敗，請重試');
+          return;
+      }
+      setUnlinkConfirmId(null);
+  };
+
+  // A token-based personal link (#/c/{token}) skips the fuzzy name-matching step
+  // entirely — opening LINE login from this specific URL binds directly to this
+  // customer record, no ambiguity. Useful for manually fixing a customer who keeps
+  // getting matched to the wrong/no record via the generic universal login link.
+  // Writes the token (when missing) and waits for it to actually land in Firestore
+  // before copying the link — otherwise the link could be copied/sent before the
+  // write finishes (or if it silently fails), and the customer opens a token that
+  // was never saved, hitting "連結無效".
+  const handleCopyDirectLink = async (customer: Customer) => {
+      const token = customer.customerToken || `${generateId()}${generateId()}`;
+      if (!customer.customerToken) {
+          try {
+              await updateDocument('customers', { ...customer, customerToken: token });
+          } catch (e) {
+              console.error('save customerToken failed', e);
+              showAlert('產生連結失敗，請重試');
+              return;
+          }
+      }
+      const url = `${window.location.origin}${window.location.pathname}#/c/${token}`;
+      navigator.clipboard.writeText(url).then(
+          () => showAlert('✅ 專屬連結已複製，貼給客人並請他用這個連結重新用 LINE 登入即可直接綁定到這筆資料'),
+          () => showAlert(url)
+      );
+  };
+
   return (
     <div className="space-y-5">
       {/* Delete Customer Confirmation Modal */}
@@ -190,6 +233,41 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
                           className="flex-1 px-6 py-4 bg-red-600 text-white font-medium hover:bg-red-700 transition-colors"
                       >
                           確定刪除
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Unlink LINE Confirmation Modal */}
+      {unlinkConfirmId && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+                  <div className="text-center">
+                      <div className="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <Unlink size={32} />
+                      </div>
+                      <h3 className="text-xl font-medium text-stone-800 mb-2">確定要解除這筆 LINE 連結嗎？</h3>
+                      <p className="text-stone-500 text-sm leading-relaxed">
+                          解除後這個客人需要重新用 LINE 登入並核對／建立帳號。<br/>
+                          如果是核對錯誤的情況，建議改用「複製專屬連結」直接綁定，避免再核對失敗。
+                      </p>
+                  </div>
+                  <div className="flex border-t border-stone-100">
+                      <button
+                          onClick={() => setUnlinkConfirmId(null)}
+                          className="flex-1 px-6 py-4 text-stone-500 font-medium hover:bg-stone-50 transition-colors"
+                      >
+                          取消
+                      </button>
+                      <button
+                          onClick={() => {
+                              const c = customers.find(cc => cc.id === unlinkConfirmId);
+                              if (c) handleUnlinkLine(c);
+                          }}
+                          className="flex-1 px-6 py-4 bg-orange-600 text-white font-medium hover:bg-orange-700 transition-colors"
+                      >
+                          確定解除
                       </button>
                   </div>
               </div>
@@ -437,6 +515,26 @@ export const CRM: React.FC<CRMProps> = ({ customers, orders, products, settings,
                             </div>
                         </div>
                     )}
+
+                    {/* LINE Link Management */}
+                    <div className="flex justify-end gap-2 mb-2">
+                        <button
+                            onClick={() => handleCopyDirectLink(customer)}
+                            className="flex items-center gap-1 px-2 py-1 bg-white border border-blue-100 text-blue-500 rounded text-xs hover:bg-blue-50 transition-colors"
+                            title="複製此客人的專屬登入連結（用這個連結 LINE 登入會直接綁定到這筆資料，不會跑核對）"
+                        >
+                            <Link2 size={12} /> 複製專屬連結
+                        </button>
+                        {customer.lineUserId && (
+                            <button
+                                onClick={() => setUnlinkConfirmId(customer.id)}
+                                className="flex items-center gap-1 px-2 py-1 bg-white border border-orange-100 text-orange-500 rounded text-xs hover:bg-orange-50 transition-colors"
+                                title="解除目前的 LINE 連結"
+                            >
+                                <Unlink size={12} /> 解除 LINE 連結
+                            </button>
+                        )}
+                    </div>
 
                     <div className="flex justify-end gap-2 mb-2">
                         {isEditing ? (

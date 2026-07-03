@@ -4,7 +4,7 @@ import { initializeFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, Fi
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, Auth } from 'firebase/auth';
 import { getFunctions, httpsCallable, Functions } from 'firebase/functions';
 import { getStorage, ref, uploadString, getDownloadURL, FirebaseStorage } from 'firebase/storage';
-import { query, where, getDocs, updateDoc } from 'firebase/firestore';
+import { query, where, getDocs, updateDoc, deleteField } from 'firebase/firestore';
 import { FirebaseConfig, Product, Customer, Order, TodoItem, GlobalSettings, SalesReport } from '../types';
 
 const firebaseConfig = {
@@ -182,6 +182,18 @@ export const addDocument = async (collectionName: string, data: any) => {
   }
 };
 
+// JSON.stringify (used by updateDocument's cleanData step) silently drops any key whose
+// value is `undefined` — so `{ ...customer, lineUserId: undefined }` never actually
+// reaches Firestore, and updateDoc leaves the existing field untouched. Use this whenever
+// a field needs to be truly removed, not just omitted.
+export const unlinkCustomerLine = async (customerId: string) => {
+  if (!db) return;
+  await updateDoc(doc(db, 'customers', customerId), {
+    lineUserId: deleteField(),
+    lineAvatarUrl: deleteField(),
+  });
+};
+
 export const updateDocument = async (collectionName: string, data: any) => {
   if (!db) return;
   try {
@@ -211,7 +223,6 @@ export const deleteDocument = async (collectionName: string, id: string) => {
 // Specialized Save for Settings
 export const saveSettingsToCloud = async (settings: GlobalSettings) => {
     if(!db) return;
-    // Exclude client-only fields; geminiApiKey is intentionally included in businessRules
     const { firebaseConfig, useCloudSync, ...businessRules } = settings;
     try {
         const cleanRules = JSON.parse(JSON.stringify(businessRules));

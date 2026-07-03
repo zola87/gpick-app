@@ -356,6 +356,11 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
   const [payState,    setPayState]    = useState<PayState>('idle');
   const [pendingLineProfile, setPendingLineProfile] = useState<{ userId: string; displayName: string; pictureUrl?: string } | null>(null);
   const [matchCandidates,    setMatchCandidates]    = useState<{ id: string; lineName: string; nickname: string | null }[]>([]);
+  const [matchIndex,         setMatchIndex]         = useState(0);
+  // Set when the customer explicitly said "not me" to a match — the next submit must
+  // create a brand-new record outright, not search for a match again (which would just
+  // find the exact same candidate and loop them straight back to the same screen).
+  const skipMatchingRef = useRef(false);
   // Profile setup fields
   const [setupNickname,   setSetupNickname]   = useState('');
   const [setupBirthYear,  setSetupBirthYear]  = useState('');
@@ -580,12 +585,9 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
           setLineStatus('newCustomer');
           return;
         }
-        // Token-based: link LINE
-        const linked: Customer = { ...customer!, lineUserId: profile.userId, lineName: profile.displayName, lineAvatarUrl: profile.pictureUrl ?? undefined };
-        await updateDocument('customers', linked);
-        setCustomer(linked); saveSession(linked.id);
-        window.history.replaceState(null, '', `${window.location.pathname}#/c/${token}`);
-        setLineStatus('idle');
+        // Token-based: ask for profile info first, then link LINE on submit
+        setPendingLineProfile({ userId: profile.userId, displayName: profile.displayName, pictureUrl: profile.pictureUrl });
+        setLineStatus('needsProfile');
       } catch (err: any) {
         console.error('LINE callback failed', err);
         setLineError('LINE 登入失敗，請重試');
@@ -633,9 +635,18 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
     if (!setupIsValid) { setShowSetupErrors(true); return; }
     setIsSavingSetup(true);
     const birthDate = `${setupBirthYear}-${setupBirthMonth.padStart(2,'0')}-${setupBirthDay.padStart(2,'0')}`;
-    const updated = { ...customer, nickname: setupNickname.trim(), birthDate, gender: setupGender as Gender };
+    const updated = {
+      ...customer,
+      nickname: setupNickname.trim(), birthDate, gender: setupGender as Gender,
+      // Token mode: also link LINE on this submit
+      ...(pendingLineProfile ? {
+        lineUserId: pendingLineProfile.userId,
+        lineName: pendingLineProfile.displayName,
+        lineAvatarUrl: pendingLineProfile.pictureUrl ?? customer.lineAvatarUrl,
+      } : {}),
+    };
     if (!isDemo) await updateDocument('customers', updated);
-    setCustomer(updated); setIsSavingSetup(false);
+    setCustomer(updated); setPendingLineProfile(null); setIsSavingSetup(false);
     if (isDemo) { setLineStatus('idle'); return; }
     window.location.replace(`${window.location.pathname}${isUniversal ? '#/c' : `#/c/${token}`}`);
   };
@@ -658,6 +669,14 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
     if (!setupIsValid || !pendingLineProfile) { setShowSetupErrors(true); return; }
     setIsSavingSetup(true);
     const birthDate = `${setupBirthYear}-${setupBirthMonth.padStart(2,'0')}-${setupBirthDay.padStart(2,'0')}`;
+    // Customer already said "not me" once — skip matching entirely this time, otherwise
+    // re-submitting the same nickname just finds the same candidate again and bounces
+    // them straight back to the same confirm screen with no way to actually create new.
+    if (skipMatchingRef.current) {
+      skipMatchingRef.current = false;
+      await createNewCustomerRecord(birthDate);
+      return;
+    }
     try {
       // Match on both signals — many older customer records only have a LINE display
       // name on file (lineName), while others were entered with a community nickname.
@@ -667,14 +686,26 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
         byNicknameFn({ nickname: setupNickname.trim() }).catch(e => { console.error('findCustomerMatches failed', e); return null; }),
         byLineNameFn({ displayName: pendingLineProfile.displayName }).catch(e => { console.error('matchCustomerByLineName failed', e); return null; }),
       ]);
+      // A candidate found by BOTH signals (nickname AND LINE name) is by far the most
+      // confident match — surface those first. Within each tier, preserve the backend's
+      // own best-match-first ordering (it already sorts exact matches ahead of fuzzy ones).
+      const byNicknameIds = new Set((byNickname?.data.matches || []).map(m => m.id));
+      const byLineNameIds = new Set((byLineName?.data.candidates || []).map(c => c.id));
       const merged = new Map<string, { id: string; lineName: string; nickname: string | null }>();
       // findCustomerMatches only ever returns a nickname match — it has no real LINE
       // display name on file, so leave lineName blank rather than mislabeling the
       // nickname as if it were the customer's actual LINE name in the confirm screen.
       byNickname?.data.matches.forEach(m => merged.set(m.id, { id: m.id, lineName: '', nickname: m.nickname }));
-      byLineName?.data.candidates.forEach(c => merged.set(c.id, c));
-      const cands = Array.from(merged.values());
-      if (cands.length > 0) { setMatchCandidates(cands); setIsSavingSetup(false); setLineStatus('confirmMatch'); return; }
+      byLineName?.data.candidates.forEach(c => {
+        const existing = merged.get(c.id);
+        merged.set(c.id, existing ? { ...c, nickname: c.nickname ?? existing.nickname } : c);
+      });
+      const cands = Array.from(merged.values()).sort((a, b) => {
+        const aBoth = (byNicknameIds.has(a.id) && byLineNameIds.has(a.id)) ? 0 : 1;
+        const bBoth = (byNicknameIds.has(b.id) && byLineNameIds.has(b.id)) ? 0 : 1;
+        return aBoth - bBoth;
+      });
+      if (cands.length > 0) { setMatchCandidates(cands); setMatchIndex(0); setIsSavingSetup(false); setLineStatus('confirmMatch'); return; }
     } catch (e) { console.error('customer matching failed', e); }
     await createNewCustomerRecord(birthDate);
   };
@@ -703,9 +734,17 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
     setLineStatus('idle');
   };
 
+  // Look at the next candidate instead of jumping straight to "create new" — there can
+  // be more than one similar match, and the right one might not be the first shown.
+  const handleNotThisOne = () => {
+    setMatchIndex(i => Math.min(i + 1, matchCandidates.length - 1));
+  };
+
   const handleNotMeCreateNew = () => {
     if (!pendingLineProfile) return;
+    skipMatchingRef.current = true;
     setMatchCandidates([]);
+    setMatchIndex(0);
     setLineStatus('newCustomer');
   };
 
@@ -772,7 +811,13 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
   const buyingCount  = useMemo(() => activeOrders.filter(o => ['looking','partial'].includes(getOrderStatus(o))).length, [activeOrders]);
   const isLineLinked = !!customer?.lineUserId;
 
-  const publishedProducts = useMemo(() => products.filter(p => p.isPublished !== false), [products]);
+  // Newest-uploaded products first — Firestore's onSnapshot order is otherwise
+  // essentially arbitrary, so without this a freshly-added product could land
+  // anywhere in the list instead of up front where customers would notice it.
+  const publishedProducts = useMemo(
+    () => products.filter(p => p.isPublished !== false).sort((a, b) => b.createdAt - a.createdAt),
+    [products]
+  );
 
   // 大分類 → 小分類：purely a display grouping defined in Settings; falls back to a
   // flat list (no group row shown) if the admin hasn't set up any groups yet.
@@ -893,7 +938,8 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
 
   // Confirm match screen
   if (lineStatus === 'confirmMatch' && matchCandidates.length > 0) {
-    const cand = matchCandidates[0];
+    const cand = matchCandidates[matchIndex];
+    const hasMore = matchIndex < matchCandidates.length - 1;
     return (
       <div className="min-h-screen bg-[#fff9f3] flex flex-col items-center justify-center p-6">
         <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-sm space-y-5" style={{ border: '1.5px solid #fad0e6' }}>
@@ -911,7 +957,9 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
             </div>
           </div>
           <div style={{ borderTop: '1px solid #f4ece4', paddingTop: 16 }}>
-            <p className="text-sm font-semibold text-[#2c2c34] mb-1">找到一筆資料，請確認是否為你？</p>
+            <p className="text-sm font-semibold text-[#2c2c34] mb-1">
+              找到{matchCandidates.length > 1 ? `第 ${matchIndex + 1}/${matchCandidates.length} 筆可能符合的資料` : '一筆資料'}，請確認是否為你？
+            </p>
             <p className="text-xs text-[#8a7e76] mb-3 leading-relaxed">系統找到名稱相似的訂單記錄，確認後訂單將自動連結。</p>
             <div className="rounded-xl p-4 space-y-2" style={{ background: '#fff8f5', border: '1px solid #f1e7dc' }}>
               {cand.lineName && (
@@ -935,6 +983,13 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
               {isSavingSetup ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
               是我，確認登入
             </button>
+            {hasMore && (
+              <button onClick={handleNotThisOne} disabled={isSavingSetup}
+                className="w-full py-3 rounded-2xl font-medium text-sm text-[#ff7d59] disabled:opacity-60 transition-opacity"
+                style={{ background: '#fff0ea', border: '1px solid #ffd5c5' }}>
+                不是這位，看下一位
+              </button>
+            )}
             <button onClick={handleNotMeCreateNew} disabled={isSavingSetup}
               className="w-full py-3 rounded-2xl font-medium text-sm text-[#8a7e76] disabled:opacity-60 transition-opacity"
               style={{ background: '#f4ece4' }}>
@@ -1312,6 +1367,18 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ token, lineCallbackC
           {/* ─── PRODUCTS TAB ─── */}
           {activeTab === 'products' && (
             <div className="max-w-2xl lg:max-w-4xl xl:max-w-6xl mx-auto px-4 md:px-8 py-3 md:py-8">
+
+              {/* 扭蛋牆入口 — desktop only (mobile uses the bottom nav tab) */}
+              {!!settings.gachaWallImages && settings.gachaWallImages.length > 0 && (
+                <button
+                  onClick={openGachaWall}
+                  className="md:flex hidden w-full items-center justify-center gap-2 mb-4 py-3 rounded-2xl font-bold text-sm"
+                  style={{ background: '#ffd29f', color: '#8a4a1f', border: 'none', cursor: 'pointer', fontFamily: "'Noto Serif TC', serif" }}
+                >
+                  <Gift size={16} style={{ color: '#8a4a1f' }} />
+                  本場扭蛋牆
+                </button>
+              )}
 
               {/* Search bar */}
               <div style={{ position: 'relative', marginBottom: 10 }}>

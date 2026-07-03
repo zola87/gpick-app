@@ -43,19 +43,22 @@ exports.matchCustomerByLineName = onCall(async (request) => {
 
   const nd   = normalizeStr(displayName);
   const snap = await db.collection('customers').get();
-  const candidates = [];
-
+  // 先收集所有符合的，每筆算一個「相似度分數」（0=完全一樣，分數越小越接近），最後統一
+  // 排序再截斷——舊寫法是邊掃邊收滿 3 筆就 break，沒有排序，如果完全一樣的那筆剛好排在
+  // Firestore 自然順序比較後面，可能根本進不了前 3 筆，導致客人看到的候選人不是自己。
+  const scored = [];
   for (const d of snap.docs) {
     const c = d.data();
     if (c.lineUserId || c.isStock || !c.lineName) continue;
-    const nl        = normalizeStr(c.lineName);
+    const nl = normalizeStr(c.lineName);
+    if (nl === nd) { scored.push({ score: 0, id: d.id, lineName: c.lineName, nickname: c.nickname ?? null }); continue; }
     const threshold = Math.max(nl.length, nd.length) <= 4 ? 1 : 2;
-    const isSimilar = nl === nd || nl.includes(nd) || nd.includes(nl) ||
-                      levenshtein(nl, nd) <= threshold;
-    if (isSimilar)
-      candidates.push({ id: d.id, lineName: c.lineName, nickname: c.nickname ?? null });
-    if (candidates.length >= 3) break;
+    const dist = levenshtein(nl, nd);
+    const isSimilar = nl.includes(nd) || nd.includes(nl) || dist <= threshold;
+    if (isSimilar) scored.push({ score: dist + 1, id: d.id, lineName: c.lineName, nickname: c.nickname ?? null });
   }
+  scored.sort((a, b) => a.score - b.score);
+  const candidates = scored.slice(0, 3).map(({ score, ...rest }) => rest);
 
   return { candidates };
 });
@@ -69,18 +72,21 @@ exports.findCustomerMatches = onCall(async (request) => {
 
   const nq   = normalizeStr(nickname);
   const snap = await db.collection('customers').get();
-  const matches = [];
-
+  // 同上：先全部掃完算分數再排序截斷，完全一樣的暱稱一定排第一，不會因為 Firestore
+  // 自然順序剛好排後面而被擠到候選清單外面。
+  const scored = [];
   for (const d of snap.docs) {
     const c = d.data();
     if (c.lineUserId || !c.nickname) continue;
-    const nc        = normalizeStr(c.nickname);
+    const nc = normalizeStr(c.nickname);
+    if (nc === nq) { scored.push({ score: 0, id: d.id, nickname: c.nickname }); continue; }
     const threshold = Math.max(nc.length, nq.length) <= 4 ? 1 : 2;
-    const isSimilar = nc === nq || nc.includes(nq) || nq.includes(nc) ||
-                      levenshtein(nc, nq) <= threshold;
-    if (isSimilar) matches.push({ id: d.id, nickname: c.nickname });
-    if (matches.length >= 5) break;
+    const dist = levenshtein(nc, nq);
+    const isSimilar = nc.includes(nq) || nq.includes(nc) || dist <= threshold;
+    if (isSimilar) scored.push({ score: dist + 1, id: d.id, nickname: c.nickname });
   }
+  scored.sort((a, b) => a.score - b.score);
+  const matches = scored.slice(0, 5).map(({ score, ...rest }) => rest);
 
   return { matches };
 });

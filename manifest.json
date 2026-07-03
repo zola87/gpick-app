@@ -4,12 +4,12 @@
   "name": "GPick 賺錢工具 +",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/2953/2953363.png",
+      "src": "/gpick-logo.png",
       "type": "image/png",
       "sizes": "192x192"
     },
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/2953/2953363.png",
+      "src": "/gpick-logo.png",
       "type": "image/png",
       "sizes": "512x512"
     }

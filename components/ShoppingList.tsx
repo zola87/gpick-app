@@ -1,9 +1,10 @@
 
 import React, { useState, useMemo } from 'react';
 import { Product, Order, Customer, GlobalSettings } from '../types';
-import { CheckCircle, Circle, MapPin, Search, ChevronDown, ChevronUp, Bell, Check, ShoppingCart, User, Plus, X, Info, ArrowUp, ArrowDown, Send, MessageSquare, Loader2, Camera } from 'lucide-react';
+import { CheckCircle, Circle, MapPin, Search, ChevronDown, ChevronUp, Bell, Check, ShoppingCart, User, Plus, X, Info, ArrowUp, ArrowDown, Send, MessageSquare, Loader2, Camera, Crop } from 'lucide-react';
 import { sendLineMessage, uploadProductImage } from '../services/firebaseService';
 import { compressImage } from '../utils/imageUtils';
+import ImageCropperModal from './ImageCropperModal';
 
 interface ShoppingListProps {
   products: Product[];
@@ -177,16 +178,22 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
     onUpdateOrder({ ...order, quantityBought: Math.min(order.quantity, order.quantityBought + 1), notificationStatus: 'NOTIFIED' });
   };
 
-  // Filter by search, location, and customer
+  // "扭蛋" toggle now actually narrows the list to gacha items only (not just sorts them
+  // first) and switches the photo grid below into a larger, easier-to-tap layout — the
+  // thumbnails were too small to reliably hit the +/-/裁切 buttons on a phone.
+  const gachaOnlyMode = sortBy === 'gachaFirst';
+  // Filter by search, location, customer, and (when active) gacha-only mode
   const filteredItems = groupedItems.filter(item => {
     const matchesSearch = item.product.name.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     const itemLocation = item.product.sourcingLocations?.find(l => l.isPrimary)?.name || item.product.sourcingLocations?.[0]?.name || item.product.sourcingLocation;
     const matchesLocation = filterLocation === 'all' || itemLocation === filterLocation;
 
     const matchesCustomer = filterCustomer === 'all' || item.orders.some(o => o.customerId === filterCustomer);
 
-    return matchesSearch && matchesLocation && matchesCustomer;
+    const matchesGachaOnly = !gachaOnlyMode || item.product.category === '扭蛋' || item.product.brand === '扭蛋';
+
+    return matchesSearch && matchesLocation && matchesCustomer && matchesGachaOnly;
   }).sort((a, b) => {
     // Always put completed items at the bottom
     if (a.isComplete !== b.isComplete) return a.isComplete ? 1 : -1;
@@ -266,10 +273,11 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
   // - resultImages: snapped after rolling, proof of what was actually received.
   // Order.quantity must never fall behind what the itemised photos add up to — otherwise
   // "已買到/總需求" and the per-design counts can disagree about whether the order is done.
-  // It can stay above the itemised sum, though: some of the quantity may not have a photo
-  // attached yet, so we only ever grow it here, never shrink it.
-  const sumRequestedQty = (items: { qty: number }[], currentQty: number) =>
-    Math.max(currentQty, items.reduce((sum, i) => sum + i.qty, 0));
+  // Quantity always tracks the live sum of itemised designs (floored at quantityBought so
+  // it never drops below what's already confirmed bought) — editing a design's qty down
+  // (e.g. 5→3) now actually shrinks the order total instead of being stuck at the old max.
+  const sumRequestedQty = (items: { qty: number }[], order: Order) =>
+    Math.max(order.quantityBought, items.reduce((sum, i) => sum + i.qty, 0));
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
   const handleUploadRequestedItems = async (order: Order, files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -279,7 +287,7 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
       const newItems = urls.map(url => ({ url, qty: 1, boughtQty: 0 }));
       const items = [...(order.requestedItems || []), ...newItems];
       // 訂單總數量要跟著款式照片的數量加總走，不然「總買到/總需求」跟個別款式會兜不起來
-      onUpdateOrder({ ...order, requestedItems: items, quantity: sumRequestedQty(items, order.quantity) });
+      onUpdateOrder({ ...order, requestedItems: items, quantity: sumRequestedQty(items, order) });
     } catch {
       alert('照片上傳失敗，請重試');
     } finally {
@@ -288,10 +296,31 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
   };
   const handleSetRequestedQty = (order: Order, url: string, qty: number) => {
     const items = (order.requestedItems || []).map(i => i.url === url ? { ...i, qty: Math.max(1, qty) } : i);
-    onUpdateOrder({ ...order, requestedItems: items, quantity: sumRequestedQty(items, order.quantity) });
+    onUpdateOrder({ ...order, requestedItems: items, quantity: sumRequestedQty(items, order) });
   };
   const handleRemoveRequestedItem = (order: Order, url: string) => {
-    onUpdateOrder({ ...order, requestedItems: (order.requestedItems || []).filter(i => i.url !== url) });
+    const items = (order.requestedItems || []).filter(i => i.url !== url);
+    onUpdateOrder({ ...order, requestedItems: items, quantity: sumRequestedQty(items, order) });
+  };
+  // Customers often send one photo containing several gacha designs they're NOT all
+  // asking for — cropping down to just the design this entry represents avoids buying
+  // the wrong one off a cluttered reference photo.
+  const [cropTarget, setCropTarget] = useState<{ orderId: string; url: string } | null>(null);
+  const handleCropRequestedItem = async (croppedImageBase64: string) => {
+    if (!cropTarget) return;
+    const { orderId, url } = cropTarget;
+    setCropTarget(null);
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
+    try {
+      const newUrl = await uploadProductImage(croppedImageBase64);
+      onUpdateOrder({
+        ...order,
+        requestedItems: (order.requestedItems || []).map(i => i.url === url ? { ...i, url: newUrl } : i),
+      });
+    } catch {
+      alert('裁切後上傳失敗，請重試');
+    }
   };
   // Tapping a design bumps its boughtQty by 1 — not the whole qty at once, since the
   // machine might run dry partway through and leave that same design half-finished.
@@ -781,7 +810,15 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                          <ShoppingCart size={12}/> 分配順序 (依喊單時間)
                       </h4>
                       <div className="space-y-2">
-                        {item.orders.map((order, idx) => {
+                        {(gachaOnlyMode
+                          ? [...item.orders].sort((a, b) => {
+                              const aDone = (a.quantityBought || 0) >= a.quantity ? 1 : 0;
+                              const bDone = (b.quantityBought || 0) >= b.quantity ? 1 : 0;
+                              if (aDone !== bDone) return aDone - bDone;
+                              return a.timestamp - b.timestamp;
+                            })
+                          : item.orders
+                        ).map((order, idx) => {
                           const customer = customers.find(c => c.id === order.customerId);
                           const isFullyAllocated = order.quantityBought >= order.quantity;
                           const isNotified = order.notificationStatus === 'NOTIFIED';
@@ -854,8 +891,11 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                                     {(order.requestedItems || []).map(item => {
                                       const boughtQty = item.boughtQty || 0;
                                       const done = boughtQty >= item.qty;
+                                      const thumbCls = gachaOnlyMode ? 'w-28 h-28' : 'w-16 h-16';
+                                      const btnCls = gachaOnlyMode ? 'w-7 h-7 text-base' : 'w-5 h-5 text-sm';
+                                      const iconSize = gachaOnlyMode ? 16 : 11;
                                       return (
-                                        <div key={item.url} className={`relative w-14 h-14 rounded-md overflow-hidden border group ${done ? 'border-green-300' : 'border-stone-200'}`}>
+                                        <div key={item.url} className={`relative ${thumbCls} rounded-md overflow-hidden border ${done ? 'border-green-300' : 'border-stone-200'}`}>
                                           <img
                                             src={item.url}
                                             onClick={() => handleBumpRequestedItem(order, item.url, 1)}
@@ -863,50 +903,75 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                                             alt="要扭的款式" referrerPolicy="no-referrer" loading="lazy"
                                             title="點一下＝買到 +1"
                                           />
-                                          {done && <Check size={20} className="absolute inset-0 m-auto text-white drop-shadow pointer-events-none" />}
-                                          <button
-                                            onClick={() => handleBumpRequestedItem(order, item.url, -1)}
-                                            className="absolute top-0 left-0 w-5 h-5 flex items-center justify-center bg-black/50 text-white text-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                                            title="-1"
-                                          >−</button>
-                                          <button
-                                            onClick={() => handleRemoveRequestedItem(order, item.url)}
-                                            className="absolute top-0 right-0 w-5 h-5 flex items-center justify-center bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                                          ><X size={11} /></button>
+                                          {done && <Check size={gachaOnlyMode ? 32 : 20} className="absolute inset-0 m-auto text-white drop-shadow pointer-events-none" />}
+                                          {/* Always-visible (not hover-only) — group-hover never triggers on touch screens,
+                                              so these buttons were unreachable on phone/tablet despite existing. */}
+                                          <div className="absolute top-0 inset-x-0 flex justify-between">
+                                            <button
+                                              onClick={(e) => { e.stopPropagation(); handleBumpRequestedItem(order, item.url, -1); }}
+                                              className={`${btnCls} flex items-center justify-center bg-black/60 text-white`}
+                                              title="-1"
+                                            >−</button>
+                                            <button
+                                              onClick={(e) => { e.stopPropagation(); setCropTarget({ orderId: order.id, url: item.url }); }}
+                                              className={`${btnCls} flex items-center justify-center bg-black/60 text-white`}
+                                              title="裁切"
+                                            ><Crop size={iconSize} /></button>
+                                            <button
+                                              onClick={(e) => { e.stopPropagation(); handleRemoveRequestedItem(order, item.url); }}
+                                              className={`${btnCls} flex items-center justify-center bg-black/60 text-white`}
+                                              title="刪除"
+                                            ><X size={iconSize} /></button>
+                                          </div>
                                           <div className="absolute bottom-0 inset-x-0 bg-black/70 flex items-center justify-center gap-0.5">
-                                            <span className="text-[10px] text-white">{boughtQty}/</span>
+                                            <span className={gachaOnlyMode ? 'text-xs text-white' : 'text-[10px] text-white'}>{boughtQty}/</span>
                                             <input
                                               type="number" min={1} value={item.qty}
                                               onChange={e => handleSetRequestedQty(order, item.url, Number(e.target.value))}
                                               onClick={e => e.stopPropagation()}
-                                              className="w-5 text-[10px] text-center bg-transparent text-white outline-none"
+                                              className={`text-center bg-transparent text-white outline-none ${gachaOnlyMode ? 'w-7 text-xs' : 'w-5 text-[10px]'}`}
                                             />
                                           </div>
                                         </div>
                                       );
                                     })}
-                                    <label className="w-14 h-14 rounded-md border border-dashed border-stone-300 flex items-center justify-center cursor-pointer text-stone-400 hover:border-[#7A9E8A] hover:text-[#7A9E8A] transition-colors">
+                                    <label className={`${gachaOnlyMode ? 'w-28 h-28' : 'w-14 h-14'} rounded-md border border-dashed border-stone-300 flex items-center justify-center cursor-pointer text-stone-400 hover:border-[#7A9E8A] hover:text-[#7A9E8A] transition-colors`}>
                                       {uploadingFor === `${order.id}:requested`
-                                        ? <Loader2 size={14} className="animate-spin" />
-                                        : <Camera size={14} />}
+                                        ? <Loader2 size={gachaOnlyMode ? 22 : 14} className="animate-spin" />
+                                        : <Camera size={gachaOnlyMode ? 22 : 14} />}
                                       <input
                                         type="file" accept="image/*" multiple className="hidden"
                                         onChange={e => { handleUploadRequestedItems(order, e.target.files); e.target.value = ''; }}
                                       />
                                     </label>
+                                    {/* Still no design photo for this order yet — give a direct "+1 for this
+                                        customer" button so admin isn't forced to use the product-level total
+                                        (which auto-distributes across customers and can credit the wrong one
+                                        when different customers are chasing different designs at the same price). */}
+                                    {order.quantityBought < order.quantity && (
+                                      <button
+                                        onClick={() => handleBumpGachaBought(order)}
+                                        className={`${gachaOnlyMode ? 'w-28 h-28' : 'w-14 h-14'} rounded-md border border-dashed border-pink-300 flex flex-col items-center justify-center text-pink-400 hover:bg-pink-50 transition-colors`}
+                                        title="還沒拍照，直接幫這位客人 +1"
+                                      >
+                                        <Plus size={gachaOnlyMode ? 22 : 14} />
+                                        <span className="text-[10px]">+1給她</span>
+                                      </button>
+                                    )}
                                     <span className="text-xs text-stone-400">客人要的款式（點照片＝買到+1，下方數字右邊可改要扭幾個）</span>
                                   </div>
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     {(order.resultImages || []).map(url => (
-                                      <div key={url} className="relative w-10 h-10 rounded-md overflow-hidden border border-stone-200 group">
+                                      <div key={url} className={`relative ${gachaOnlyMode ? 'w-20 h-20' : 'w-10 h-10'} rounded-md overflow-hidden border border-stone-200`}>
                                         <img src={url} className="w-full h-full object-cover" alt="扭蛋結果" referrerPolicy="no-referrer" loading="lazy" />
                                         <button
                                           onClick={() => handleRemoveResultImage(order, url)}
-                                          className="absolute inset-0 bg-black/50 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
-                                        ><X size={14} /></button>
+                                          className={`absolute top-0 right-0 flex items-center justify-center bg-black/60 text-white ${gachaOnlyMode ? 'w-7 h-7' : 'w-5 h-5'}`}
+                                          title="刪除"
+                                        ><X size={gachaOnlyMode ? 16 : 11} /></button>
                                       </div>
                                     ))}
-                                    <label className="w-10 h-10 rounded-md border border-dashed border-stone-300 flex items-center justify-center cursor-pointer text-stone-400 hover:border-[#7A9E8A] hover:text-[#7A9E8A] transition-colors">
+                                    <label className={`${gachaOnlyMode ? 'w-20 h-20' : 'w-10 h-10'} rounded-md border border-dashed border-stone-300 flex items-center justify-center cursor-pointer text-stone-400 hover:border-[#7A9E8A] hover:text-[#7A9E8A] transition-colors`}>
                                       {uploadingFor === `${order.id}:result`
                                         ? <Loader2 size={14} className="animate-spin" />
                                         : <Camera size={14} />}
@@ -1132,6 +1197,14 @@ export const ShoppingList: React.FC<ShoppingListProps> = ({ products, orders, cu
                   </div>
               </div>
           </div>
+      )}
+
+      {cropTarget && (
+          <ImageCropperModal
+              imageSrc={cropTarget.url}
+              onCropComplete={handleCropRequestedItem}
+              onCancel={() => setCropTarget(null)}
+          />
       )}
     </div>
   );
