@@ -56,6 +56,10 @@ export interface GlobalSettings {
   // same-bank transfer to skip the inter-bank fee).
   bankAccounts?: { id: string; label: string; account: string }[];
   shopeeOrderLink?: string;  // 賣貨便本場連線共用下單連結，匯款確認後推播給客人
+
+  // Community social links (shown on customer-facing Profile tab)
+  communityLine?: string;      // LINE 社群/群組邀請連結
+  communityInstagram?: string; // Instagram 帳號連結（如 https://www.instagram.com/yourhandle）
 }
 
 export interface SourcingLocation {
